@@ -1,0 +1,13 @@
+server:
+  port: ":8081"
+  mode_debug: "debug"
+  mode_release: "release"
+  
+database:
+  username: "root"
+  password: "zyz20050922"
+  host: "192.168.3.114"
+  port: 3306
+  dbname: "graduation_project"
+  charset: "utf8mb4"
+  
