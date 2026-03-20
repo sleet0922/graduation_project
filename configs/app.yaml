@@ -1,0 +1,7 @@
+server:
+  port: ":8081"
+  mode: "debug"
+
+mysql:
+  dsn: "root:Zyz20050922!@tcp(192.168.3.114:3306)/graduation_project?charset=utf8mb4&parseTime=True&loc=Local"
+  
