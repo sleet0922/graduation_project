@@ -10,4 +10,10 @@ database:
   port: 3306
   dbname: "graduation_project"
   charset: "utf8mb4"
-  
+
+cos:
+  secret_id: "AKID2wd8QVWKvKVXMI6j9MNCoDUZ8Up25xfJ"
+  secret_key: "WpxtcCcpsBRbeeWH4mNtGc2Mdu4FH9rQ"
+  bucket: "gelsomino-1313022211"
+  region: "ap-nanjing"
+  base_path: ""

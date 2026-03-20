@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func InitDB(cfg *config.Config) *gorm.DB {
+func InitDB(cfg *config.ViperConfig) *gorm.DB {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
 		cfg.Database.Username,
 		cfg.Database.Password,

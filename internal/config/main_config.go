@@ -21,12 +21,21 @@ type GinPortConfig struct {
 	Mode_Release string `json:"mode_release"`
 }
 
-type Config struct {
-	Server   GinPortConfig  `json:"server"`
-	Database DatabaseConfig `json:"database"`
+type COSConfig struct {
+	SecretID  string `json:"secret_id" mapstructure:"secret_id"`
+	SecretKey string `json:"secret_key" mapstructure:"secret_key"`
+	Bucket    string `json:"bucket" mapstructure:"bucket"`
+	Region    string `json:"region" mapstructure:"region"`
+	BasePath  string `json:"base_path" mapstructure:"base_path"`
 }
 
-func InitConfig() *Config {
+type ViperConfig struct {
+	Server   GinPortConfig  `json:"server"`
+	Database DatabaseConfig `json:"database"`
+	Cos      COSConfig      `json:"cos" mapstructure:"cos"`
+}
+
+func InitConfig() *ViperConfig {
 	viper.SetConfigFile("configs/config.yaml")
 	viper.SetConfigType("yaml")
 	err := viper.ReadInConfig()
@@ -34,7 +43,7 @@ func InitConfig() *Config {
 		panic(fmt.Sprintf("读取配置文件失败: %v", err))
 	}
 
-	var config Config
+	var config ViperConfig
 	err = viper.Unmarshal(&config)
 	if err != nil {
 		panic(fmt.Sprintf("解析配置文件失败: %v", err))
