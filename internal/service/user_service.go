@@ -3,9 +3,8 @@ package service
 import (
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
+	"sleet0922/graduation_project/pkg/security"
 	"strconv"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ----------用户service 接口----------
@@ -32,11 +31,11 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 
 // ----------用户service 方法----------
 func (s *userService) Add(user *model.User) error {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	hashedPassword, err := security.HashPassword(user.Password)
 	if err != nil {
 		return err
 	}
-	user.Password = string(hashedPassword)
+	user.Password = hashedPassword
 	return s.userRepo.Add(user)
 }
 
@@ -46,11 +45,11 @@ func (s *userService) Delete(id int) error {
 
 func (s *userService) Update(user *model.User) error {
 	if user.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+		hashedPassword, err := security.HashPassword(user.Password)
 		if err != nil {
 			return err
 		}
-		user.Password = string(hashedPassword)
+		user.Password = hashedPassword
 	}
 	return s.userRepo.Update(user)
 }
