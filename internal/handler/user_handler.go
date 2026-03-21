@@ -34,3 +34,21 @@ func (h *UserHandler) Add(c *gin.Context) {
 	}
 	response.Success(c, user, "添加用户成功")
 }
+
+func (h *UserHandler) DeleteAll(c *gin.Context) {
+	err := h.userService.DeleteAll()
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "删除所有用户失败")
+		return
+	}
+	response.Success(c, nil, "删除所有用户成功")
+}
+
+func (h *UserHandler) AddTestUser(c *gin.Context) {
+	err := h.userService.AddTestUser()
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "添加测试用户失败")
+		return
+	}
+	response.Success(c, nil, "添加测试用户成功")
+}

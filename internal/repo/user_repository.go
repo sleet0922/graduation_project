@@ -9,11 +9,13 @@ import (
 // ----------数据库操作层 接口----------
 type UserRepository interface {
 	Add(user *model.User) error
+	Delete(id int) error
+	Update(user *model.User) error
+	DeleteAll() error   //测试接口
+	AddTestUser() error //测试接口
 	GetByID(id int) (*model.User, error)
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
-	Update(user *model.User) error
-	Delete(id int) error
 }
 
 // ----------数据库操作层 实现----------
@@ -37,6 +39,24 @@ func (r *userRepository) Delete(id int) error {
 
 func (r *userRepository) Update(user *model.User) error {
 	return r.db.Save(user).Error
+}
+
+func (r *userRepository) DeleteAll() error {
+	return r.db.Unscoped().Where("1=1").Delete(&model.User{}).Error
+}
+
+func (r *userRepository) AddTestUser() error {
+	return r.db.Create(&model.User{
+		Name:       "sleet",
+		Account:    "943781228",
+		Password:   "Zyz20050922!",
+		Phone:      "13915181300",
+		Avatar:     "https://example.com/avatar.jpg",
+		Gender:     1,
+		Birthday:   "2006-05-28",
+		Location:   "江苏",
+		UserStatus: 0,
+	}).Error
 }
 
 func (r *userRepository) GetByID(id int) (*model.User, error) {

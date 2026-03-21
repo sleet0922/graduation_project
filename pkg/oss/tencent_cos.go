@@ -63,3 +63,23 @@ func (cosClient *TencentCOS) DeleteFile(ctx context.Context, objectKey string) e
 	}
 	return nil
 }
+
+// ----------对象存储 生成预签名上传URL----------
+func (cosClient *TencentCOS) GetPresignedUploadURL(ctx context.Context, objectKey string, expiresIn time.Duration) (string, error) {
+	objectKey = strings.TrimLeft(objectKey, "/")
+	presignedURL, err := cosClient.client.Object.GetPresignedURL(ctx, http.MethodPut, objectKey, cosClient.config.SecretID, cosClient.config.SecretKey, expiresIn, nil)
+	if err != nil {
+		return "", fmt.Errorf("生成预签名上传URL失败: %v", err)
+	}
+	return presignedURL.String(), nil
+}
+
+// ----------对象存储 生成预签名下载URL----------
+func (cosClient *TencentCOS) GetPresignedDownloadURL(ctx context.Context, objectKey string, expiresIn time.Duration) (string, error) {
+	objectKey = strings.TrimLeft(objectKey, "/")
+	presignedURL, err := cosClient.client.Object.GetPresignedURL(ctx, http.MethodGet, objectKey, cosClient.config.SecretID, cosClient.config.SecretKey, expiresIn, nil)
+	if err != nil {
+		return "", fmt.Errorf("生成预签名下载URL失败: %v", err)
+	}
+	return presignedURL.String(), nil
+}
