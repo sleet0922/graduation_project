@@ -16,7 +16,7 @@ func main() {
 
 	database := db.InitDB(cfg)
 
-	r := router.InitRouter(database)
+	r := router.InitRouter(database, cfg)
 
 	err := r.Run(cfg.Server.Port)
 	if err != nil {

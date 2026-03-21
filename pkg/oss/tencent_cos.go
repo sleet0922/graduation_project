@@ -19,6 +19,8 @@ type TencentCOS struct {
 }
 
 // ----------初始化 对象存储----------
+// 传入: cfg *config.ViperConfig (全局配置对象)
+// 返回: *TencentCOS (初始化完成的COS客户端实例)
 func NewTencentCOS(cfg *config.ViperConfig) *TencentCOS {
 	cos_config := cfg.Cos
 	bucketURL, _ := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com", cos_config.Bucket, cos_config.Region))
@@ -36,6 +38,10 @@ func NewTencentCOS(cfg *config.ViperConfig) *TencentCOS {
 }
 
 // ----------对象存储 上传文件----------
+// 传入: ctx context.Context          (上下文控制对象)
+// 传入: file *multipart.FileHeader   (前端上传的表单文件对象)
+// 传入: destDirectory string         (COS路径目录名)
+// 返回: string                       (公网访问URL) / 返回: error (错误信息，成功则为nil)
 func (cosClient *TencentCOS) UploadFile(ctx context.Context, file *multipart.FileHeader, destDirectory string) (string, error) {
 	openedFile, err := file.Open()
 	if err != nil {
@@ -55,6 +61,9 @@ func (cosClient *TencentCOS) UploadFile(ctx context.Context, file *multipart.Fil
 }
 
 // ----------对象存储 删除文件----------
+// 传入: ctx context.Context          (上下文控制对象)
+// 传入: objectKey string             (COS对象键，包含路径)
+// 返回: error                        (错误信息，成功则为nil)
 func (cosClient *TencentCOS) DeleteFile(ctx context.Context, objectKey string) error {
 	objectKey = strings.TrimLeft(objectKey, "/")
 	_, err := cosClient.client.Object.Delete(ctx, objectKey, nil)
@@ -65,6 +74,10 @@ func (cosClient *TencentCOS) DeleteFile(ctx context.Context, objectKey string) e
 }
 
 // ----------对象存储 生成预签名上传URL----------
+// 传入: ctx context.Context          (上下文控制对象)
+// 传入: objectKey string             (COS对象键，包含路径)
+// 传入: expiresIn time.Duration      (URL过期时间)
+// 返回: string                       (预签名上传URL) / 返回: error (错误信息，成功则为nil)
 func (cosClient *TencentCOS) GetPresignedUploadURL(ctx context.Context, objectKey string, expiresIn time.Duration) (string, error) {
 	objectKey = strings.TrimLeft(objectKey, "/")
 	presignedURL, err := cosClient.client.Object.GetPresignedURL(ctx, http.MethodPut, objectKey, cosClient.config.SecretID, cosClient.config.SecretKey, expiresIn, nil)
@@ -75,6 +88,10 @@ func (cosClient *TencentCOS) GetPresignedUploadURL(ctx context.Context, objectKe
 }
 
 // ----------对象存储 生成预签名下载URL----------
+// 传入: ctx context.Context          (上下文控制对象)
+// 传入: objectKey string             (COS对象键，包含路径)
+// 传入: expiresIn time.Duration      (URL过期时间)
+// 返回: string                       (预签名下载URL) / 返回: error (错误信息，成功则为nil)
 func (cosClient *TencentCOS) GetPresignedDownloadURL(ctx context.Context, objectKey string, expiresIn time.Duration) (string, error) {
 	objectKey = strings.TrimLeft(objectKey, "/")
 	presignedURL, err := cosClient.client.Object.GetPresignedURL(ctx, http.MethodGet, objectKey, cosClient.config.SecretID, cosClient.config.SecretKey, expiresIn, nil)

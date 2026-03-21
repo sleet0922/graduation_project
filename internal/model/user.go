@@ -4,15 +4,15 @@ import "gorm.io/gorm"
 
 type User struct {
 	gorm.Model
-	Name       string `json:"name"`
-	Account    string `json:"account"`
-	Password   string `json:"-"`
-	Phone      string `json:"phone" gorm:"not null"`
-	Avatar     string `json:"avatar" gorm:"not null"`
-	Gender     int    `json:"gender"`
-	Birthday   string `json:"birthday"`
-	Location   string `json:"location"`
-	UserStatus int    `json:"user_status" gorm:"not null; default:0"`
+	Name       string `json:"name" gorm:"not null"`
+	Account    string `json:"account" gorm:"uniqueIndex;not null"`
+	Password   string `json:"password" gorm:"not null"`
+	Phone      string `json:"phone" gorm:"uniqueIndex;not null"`
+	Avatar     string `json:"avatar" gorm:"default:''"`
+	Gender     int    `json:"gender" gorm:"default:0"`
+	Birthday   string `json:"birthday" gorm:"default:''"`
+	Location   string `json:"location" gorm:"default:''"`
+	UserStatus int    `json:"user_status" gorm:"default:0"`
 }
 
 func (User) TableName() string {

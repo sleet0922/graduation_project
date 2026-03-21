@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/security"
@@ -17,6 +18,8 @@ type UserService interface {
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
 	AddTestUser() error
+	Login(account, password string) (*model.User, error)
+	UpdateAvatar(userID uint, avatar string) (*model.User, error)
 }
 
 // ----------用户service 实现----------
@@ -91,4 +94,22 @@ func (s *userService) AddTestUser() error {
 		}
 	}
 	return nil
+}
+
+func (s *userService) Login(account, password string) (*model.User, error) {
+	user, err := s.userRepo.GetByAccount(account)
+	if err != nil {
+		return nil, errors.New("账号或密码错误")
+	}
+
+	err = security.CheckPassword(user.Password, password)
+	if err != nil {
+		return nil, errors.New("账号或密码错误")
+	}
+
+	return user, nil
+}
+
+func (s *userService) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
+	return s.userRepo.UpdateAvatar(userID, avatar)
 }

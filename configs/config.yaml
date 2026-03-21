@@ -2,7 +2,7 @@ server:
   port: ":8081"
   mode_debug: "debug"
   mode_release: "release"
-  
+
 database:
   username: "root"
   password: "zyz20050922"
@@ -17,3 +17,6 @@ cos:
   bucket: "gelsomino-1313022211"
   region: "ap-nanjing"
   base_path: ""
+
+jwt:
+  secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"

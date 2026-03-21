@@ -29,10 +29,15 @@ type COSConfig struct {
 	BasePath  string `json:"base_path" mapstructure:"base_path"`
 }
 
+type JWTConfig struct {
+	SecretKey string `json:"secret_key" mapstructure:"secret_key"`
+}
+
 type ViperConfig struct {
 	Server   GinPortConfig  `json:"server"`
 	Database DatabaseConfig `json:"database"`
 	Cos      COSConfig      `json:"cos" mapstructure:"cos"`
+	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
 }
 
 func InitConfig() *ViperConfig {

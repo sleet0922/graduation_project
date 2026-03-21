@@ -16,6 +16,7 @@ type UserRepository interface {
 	GetByID(id int) (*model.User, error)
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
+	UpdateAvatar(userID uint, avatar string) (*model.User, error)
 }
 
 // ----------数据库操作层 实现----------
@@ -80,6 +81,20 @@ func (r *userRepository) GetByAccount(account string) (*model.User, error) {
 func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("phone = ?", phone).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("id = ?", userID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	user.Avatar = avatar
+	err = r.db.Save(&user).Error
 	if err != nil {
 		return nil, err
 	}
