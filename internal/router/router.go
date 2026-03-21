@@ -15,6 +15,7 @@ import (
 func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r := gin.Default()
 
+	// 添加中间件
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 
