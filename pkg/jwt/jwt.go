@@ -7,11 +7,24 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type ClaimsInterface interface {
+	GetUserID() uint
+	GetAccount() string
+}
+
 // Claims JWT声明结构体
 type Claims struct {
 	UserID               uint   `json:"user_id"` // 用户ID
 	Account              string `json:"account"` // 用户账号
 	jwt.RegisteredClaims        // JWT标准声明（过期时间、签发时间等）
+}
+
+func (c *Claims) GetUserID() uint {
+	return c.UserID
+}
+
+func (c *Claims) GetAccount() string {
+	return c.Account
 }
 
 // 负责生成、解析和刷新JWT token

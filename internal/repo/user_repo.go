@@ -9,11 +9,11 @@ import (
 // ----------数据库操作层 接口----------
 type UserRepository interface {
 	Add(user *model.User) error
-	Delete(id int) error
+	Delete(id uint) error
 	Update(user *model.User) error
-	DeleteAll() error   //测试接口
-	AddTestUser() error //测试接口
-	GetByID(id int) (*model.User, error)
+	DeleteAll() error
+	AddTestUser() error
+	GetByID(id uint) (*model.User, error)
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
@@ -35,8 +35,7 @@ func (r *userRepository) Add(user *model.User) error {
 	return r.db.Create(user).Error
 }
 
-// 删除用户
-func (r *userRepository) Delete(id int) error {
+func (r *userRepository) Delete(id uint) error {
 	return r.db.Delete(&model.User{}, id).Error
 }
 
@@ -65,8 +64,7 @@ func (r *userRepository) AddTestUser() error {
 	}).Error
 }
 
-// 根据ID获取用户
-func (r *userRepository) GetByID(id int) (*model.User, error) {
+func (r *userRepository) GetByID(id uint) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("id = ?", id).First(&user).Error
 	if err != nil {
@@ -95,32 +93,26 @@ func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	return &user, nil
 }
 
-// 更新用户头像
-func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
+// 更新用户指定字段
+func (r *userRepository) UpdateField(userID uint, field string, value interface{}) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("id = ?", userID).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
-	user.Avatar = avatar
-	err = r.db.Save(&user).Error
+	err = r.db.Model(&user).Update(field, value).Error
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
 }
 
+// 更新用户头像
+func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
+	return r.UpdateField(userID, "avatar", avatar)
+}
+
 // 更新用户名
 func (r *userRepository) UpdateName(userID uint, name string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("id = ?", userID).First(&user).Error
-	if err != nil {
-		return nil, err
-	}
-	user.Name = name
-	err = r.db.Save(&user).Error
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+	return r.UpdateField(userID, "name", name)
 }
