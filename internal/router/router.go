@@ -30,13 +30,14 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	ossHandler := handler.NewOssHandler(cfg)
 
 	// api 路由
-	r.POST("/api/user/add", userHandler.Add)
+	r.POST("/api/user/register", userHandler.Register)
 	r.POST("/api/user/login", userHandler.Login)
 	r.GET("/api/oss/upload-url", ossHandler.GetUploadURL)
 	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
 	r.POST("/api/user/avatar", jwtMiddleware.Auth(), userHandler.UpdateAvatar)
 	r.POST("/api/delete_all", userHandler.DeleteAll)
 	r.POST("/api/add_test_user", userHandler.AddTestUser)
+	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
 
 	return r
 }

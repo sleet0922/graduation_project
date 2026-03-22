@@ -48,7 +48,7 @@ func (m *JWTMiddleware) Auth() gin.HandlerFunc {
 		}
 
 		// 将用户信息存入上下文，供后续handler使用
-		c.Set("user_id", claims.UserID)
+		c.Set("user_id", uint(claims.UserID))
 		c.Set("account", claims.Account)
 		c.Next()
 	}
@@ -85,7 +85,7 @@ func (m *JWTMiddleware) OptionalAuth() gin.HandlerFunc {
 		}
 
 		// token有效，将用户信息存入上下文
-		c.Set("user_id", claims.UserID)
+		c.Set("user_id", uint(claims.UserID))
 		c.Set("account", claims.Account)
 		c.Next()
 	}

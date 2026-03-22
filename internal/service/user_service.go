@@ -10,16 +10,12 @@ import (
 
 // ----------用户service 接口----------
 type UserService interface {
-	Add(user *model.User) error
-	Delete(id int) error
-	Update(user *model.User) error
+	Register(user *model.User) error
 	DeleteAll() error
-	GetByID(id int) (*model.User, error)
-	GetByAccount(account string) (*model.User, error)
-	GetByPhone(phone string) (*model.User, error)
 	AddTestUser() error
 	Login(account, password string) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
+	UpdateName(userID uint, name string) (*model.User, error)
 }
 
 // ----------用户service 实现----------
@@ -33,40 +29,13 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 }
 
 // ----------用户service 方法----------
-func (s *userService) Add(user *model.User) error {
+func (s *userService) Register(user *model.User) error {
 	hashedPassword, err := security.HashPassword(user.Password)
 	if err != nil {
 		return err
 	}
 	user.Password = hashedPassword
 	return s.userRepo.Add(user)
-}
-
-func (s *userService) Delete(id int) error {
-	return s.userRepo.Delete(id)
-}
-
-func (s *userService) Update(user *model.User) error {
-	if user.Password != "" {
-		hashedPassword, err := security.HashPassword(user.Password)
-		if err != nil {
-			return err
-		}
-		user.Password = hashedPassword
-	}
-	return s.userRepo.Update(user)
-}
-
-func (s *userService) GetByID(id int) (*model.User, error) {
-	return s.userRepo.GetByID(id)
-}
-
-func (s *userService) GetByAccount(account string) (*model.User, error) {
-	return s.userRepo.GetByAccount(account)
-}
-
-func (s *userService) GetByPhone(phone string) (*model.User, error) {
-	return s.userRepo.GetByPhone(phone)
 }
 
 func (s *userService) DeleteAll() error {
@@ -88,7 +57,7 @@ func (s *userService) AddTestUser() error {
 			Location:   "北京",
 			UserStatus: 0,
 		}
-		err := s.Add(user)
+		err := s.Register(user)
 		if err != nil {
 			return err
 		}
@@ -112,4 +81,8 @@ func (s *userService) Login(account, password string) (*model.User, error) {
 
 func (s *userService) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
 	return s.userRepo.UpdateAvatar(userID, avatar)
+}
+
+func (s *userService) UpdateName(userID uint, name string) (*model.User, error) {
+	return s.userRepo.UpdateName(userID, name)
 }

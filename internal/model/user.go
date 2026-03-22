@@ -6,7 +6,7 @@ type User struct {
 	gorm.Model
 	Name       string `json:"name" gorm:"not null"`
 	Account    string `json:"account" gorm:"uniqueIndex;not null"`
-	Password   string `json:"password" gorm:"not null"`
+	Password   string `json:"-" gorm:"not null"`
 	Phone      string `json:"phone" gorm:"uniqueIndex;not null"`
 	Avatar     string `json:"avatar" gorm:"default:''"`
 	Gender     int    `json:"gender" gorm:"default:0"`

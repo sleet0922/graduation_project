@@ -26,19 +26,34 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager)
 }
 
 // ----------用户handler 方法----------
-func (h *UserHandler) Add(c *gin.Context) {
-	var user model.User
-	err := c.ShouldBindJSON(&user)
+func (h *UserHandler) Register(c *gin.Context) {
+	type RegisterRequest struct {
+		Name     string `json:"name" binding:"required"`
+		Account  string `json:"account" binding:"required"`
+		Password string `json:"password" binding:"required"`
+		Phone    string `json:"phone" binding:"required"`
+	}
+
+	var req RegisterRequest
+	err := c.ShouldBindJSON(&req)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	err = h.userService.Add(&user)
+
+	user := &model.User{
+		Name:     req.Name,
+		Account:  req.Account,
+		Password: req.Password,
+		Phone:    req.Phone,
+	}
+
+	err = h.userService.Register(user)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "添加用户失败")
+		response.Error(c, http.StatusInternalServerError, "注册失败")
 		return
 	}
-	response.Success(c, user, "添加用户成功")
+	response.Success(c, user, "注册成功")
 }
 
 func (h *UserHandler) DeleteAll(c *gin.Context) {
@@ -124,4 +139,32 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 		"id":         user.ID,
 		"object_key": user.Avatar,
 	}, "更新头像成功")
+}
+
+func (h *UserHandler) UpdateName(c *gin.Context) {
+	type UpdateNameRequest struct {
+		Name string `json:"name" binding:"required"`
+	}
+
+	var req UpdateNameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+
+	user, err := h.userService.UpdateName(userID.(uint), req.Name)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "更新用户名失败")
+		return
+	}
+	response.Success(c, gin.H{
+		"id":   user.ID,
+		"name": user.Name,
+	}, "更新用户名成功")
 }

@@ -17,6 +17,7 @@ type UserRepository interface {
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
+	UpdateName(userID uint, name string) (*model.User, error)
 }
 
 // ----------数据库操作层 实现----------
@@ -34,18 +35,22 @@ func (r *userRepository) Add(user *model.User) error {
 	return r.db.Create(user).Error
 }
 
+// 删除用户
 func (r *userRepository) Delete(id int) error {
 	return r.db.Delete(&model.User{}, id).Error
 }
 
+// 更新用户
 func (r *userRepository) Update(user *model.User) error {
 	return r.db.Save(user).Error
 }
 
+// 删除所有用户
 func (r *userRepository) DeleteAll() error {
 	return r.db.Unscoped().Where("1=1").Delete(&model.User{}).Error
 }
 
+// 添加测试用户
 func (r *userRepository) AddTestUser() error {
 	return r.db.Create(&model.User{
 		Name:       "sleet",
@@ -60,6 +65,7 @@ func (r *userRepository) AddTestUser() error {
 	}).Error
 }
 
+// 根据ID获取用户
 func (r *userRepository) GetByID(id int) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("id = ?", id).First(&user).Error
@@ -69,6 +75,7 @@ func (r *userRepository) GetByID(id int) (*model.User, error) {
 	return &user, nil
 }
 
+// 根据账号获取用户
 func (r *userRepository) GetByAccount(account string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("account = ?", account).First(&user).Error
@@ -78,6 +85,7 @@ func (r *userRepository) GetByAccount(account string) (*model.User, error) {
 	return &user, nil
 }
 
+// 根据手机号获取用户
 func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("phone = ?", phone).First(&user).Error
@@ -87,6 +95,7 @@ func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	return &user, nil
 }
 
+// 更新用户头像
 func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("id = ?", userID).First(&user).Error
@@ -94,6 +103,21 @@ func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, 
 		return nil, err
 	}
 	user.Avatar = avatar
+	err = r.db.Save(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// 更新用户名
+func (r *userRepository) UpdateName(userID uint, name string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("id = ?", userID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	user.Name = name
 	err = r.db.Save(&user).Error
 	if err != nil {
 		return nil, err
