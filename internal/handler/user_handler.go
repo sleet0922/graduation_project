@@ -16,12 +16,15 @@ type UserHandler struct {
 	jwtManager  *jwt.JWTManager
 }
 
+// ----------用户 handler 构造函数----------
 func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager) *UserHandler {
 	return &UserHandler{
 		userService: userService,
 		jwtManager:  jwtManager,
 	}
 }
+
+// ----------用户 handler 方法----------
 func (h *UserHandler) GetSelf(c *gin.Context) {
 	userID, err := h.getUserID(c)
 	if err != nil {

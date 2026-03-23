@@ -20,14 +20,17 @@ type FriendRepository interface {
 	RemoveBothFriends(userID, friendID uint) error
 }
 
+// ----------好友 repository 实现----------
 type friendRepository struct {
 	db *gorm.DB
 }
 
+// ----------好友 repository 构造函数----------
 func NewFriendRepository(db *gorm.DB) FriendRepository {
 	return &friendRepository{db: db}
 }
 
+// ----------好友 repository 方法----------
 func (r *friendRepository) Create(friend *model.Friend) error {
 	return r.db.Create(friend).Error
 }

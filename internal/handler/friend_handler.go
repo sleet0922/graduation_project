@@ -15,6 +15,7 @@ type FriendHandler struct {
 	jwtManager    *jwt.JWTManager
 }
 
+// ----------好友 handler 构造函数----------
 func NewFriendHandler(friendService service.FriendService, jwtManager *jwt.JWTManager) *FriendHandler {
 	return &FriendHandler{
 		friendService: friendService,
@@ -22,6 +23,7 @@ func NewFriendHandler(friendService service.FriendService, jwtManager *jwt.JWTMa
 	}
 }
 
+// ----------好友 handler 方法----------
 func (h *FriendHandler) Create(c *gin.Context) {
 	type CreateFriendRequest struct {
 		FriendID uint `json:"friend_id" binding:"required"`

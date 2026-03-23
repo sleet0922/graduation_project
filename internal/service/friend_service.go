@@ -5,6 +5,7 @@ import (
 	"sleet0922/graduation_project/internal/repo"
 )
 
+// ----------好友 service 接口----------
 type FriendService interface {
 	SendFriendRequest(senderID, receiverID uint) error
 	HandleFriendRequest(requestID uint, status uint) error
@@ -14,14 +15,17 @@ type FriendService interface {
 	CheckFriendship(userID uint, friendID uint) bool
 }
 
+// ----------好友 service 实现----------
 type friendService struct {
 	friendRepo repo.FriendRepository
 }
 
+// ----------好友 service 构造函数----------
 func NewFriendService(repo repo.FriendRepository) FriendService {
 	return &friendService{friendRepo: repo}
 }
 
+// ----------好友 service 方法----------
 func (s *friendService) SendFriendRequest(senderID, receiverID uint) error {
 	exists, err := s.friendRepo.CheckRequestExists(senderID, receiverID)
 	if err != nil {

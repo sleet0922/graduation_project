@@ -57,7 +57,6 @@ func (s *userService) Login(account, password string) (*model.User, error) {
 	if err != nil {
 		return nil, errors.New("账号或密码错误")
 	}
-
 	return user, nil
 }
 
