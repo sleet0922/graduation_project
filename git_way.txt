@@ -4,6 +4,9 @@ git remote add origin https://github.com/sleet0922/graduation_project.git
 git pull origin main
 git status
 
+//看大小
+du -sh ./
+
 //提交
 git add .
 git commit -m "$(date +%Y-%m-%d)"

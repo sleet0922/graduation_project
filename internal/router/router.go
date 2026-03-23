@@ -38,6 +38,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/delete_all", userHandler.DeleteAll)
 	r.POST("/api/add_test_user", userHandler.AddTestUser)
 	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
-
+	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
+	r.POST("/api/user/self", jwtMiddleware.Auth(), userHandler.GetSelf)
 	return r
 }

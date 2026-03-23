@@ -6,7 +6,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// ----------数据库操作层 接口----------
 type UserRepository interface {
 	Add(user *model.User) error
 	Delete(id uint) error
@@ -16,8 +15,8 @@ type UserRepository interface {
 	GetByID(id uint) (*model.User, error)
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
-	UpdateAvatar(userID uint, avatar string) (*model.User, error)
-	UpdateName(userID uint, name string) (*model.User, error)
+	UpdateField(userID uint, field string, value interface{}) (*model.User, error)
+	GetSelf(userID uint) (*model.User, error)
 }
 
 // ----------数据库操作层 实现----------
@@ -83,7 +82,6 @@ func (r *userRepository) GetByAccount(account string) (*model.User, error) {
 	return &user, nil
 }
 
-// 根据手机号获取用户
 func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("phone = ?", phone).First(&user).Error
@@ -93,7 +91,6 @@ func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	return &user, nil
 }
 
-// 更新用户指定字段
 func (r *userRepository) UpdateField(userID uint, field string, value interface{}) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("id = ?", userID).First(&user).Error
@@ -107,12 +104,11 @@ func (r *userRepository) UpdateField(userID uint, field string, value interface{
 	return &user, nil
 }
 
-// 更新用户头像
-func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
-	return r.UpdateField(userID, "avatar", avatar)
-}
-
-// 更新用户名
-func (r *userRepository) UpdateName(userID uint, name string) (*model.User, error) {
-	return r.UpdateField(userID, "name", name)
+func (r *userRepository) GetSelf(userID uint) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("id = ?", userID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }

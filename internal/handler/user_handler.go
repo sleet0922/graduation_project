@@ -6,26 +6,44 @@ import (
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/jwt"
 	"sleet0922/graduation_project/pkg/response"
+	"sleet0922/graduation_project/pkg/security"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// ----------用户handler 实现----------
 type UserHandler struct {
 	userService service.UserService
 	jwtManager  *jwt.JWTManager
 }
 
-// ----------用户handler 构造函数----------
 func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager) *UserHandler {
 	return &UserHandler{
 		userService: userService,
 		jwtManager:  jwtManager,
 	}
 }
+func (h *UserHandler) GetSelf(c *gin.Context) {
+	userID, err := h.getUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+	user, err := h.userService.GetSelf(userID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "获取用户信息失败")
+		return
+	}
+	response.Success(c, user, "获取用户信息成功")
+}
 
-// ----------用户handler 方法----------
+func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, nil
+	}
+	return userID.(uint), nil
+}
 func (h *UserHandler) Register(c *gin.Context) {
 	type RegisterRequest struct {
 		Name     string `json:"name" binding:"required"`
@@ -117,54 +135,74 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 	type UpdateAvatarRequest struct {
 		ObjectKey string `json:"object_key" binding:"required"`
 	}
-
 	var req UpdateAvatarRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
 		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
 		return
 	}
-
-	user, err := h.userService.UpdateAvatar(userID.(uint), req.ObjectKey)
+	user, err := h.userService.UpdateField(userID, "avatar", req.ObjectKey)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "更新头像失败")
 		return
 	}
-	response.Success(c, gin.H{
-		"id":         user.ID,
-		"object_key": user.Avatar,
-	}, "更新头像成功")
+	response.Success(c, gin.H{"id": user.ID, "object_key": user.Avatar}, "更新头像成功")
 }
 
 func (h *UserHandler) UpdateName(c *gin.Context) {
 	type UpdateNameRequest struct {
 		Name string `json:"name" binding:"required"`
 	}
-
 	var req UpdateNameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
 		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
 		return
 	}
-
-	user, err := h.userService.UpdateName(userID.(uint), req.Name)
+	user, err := h.userService.UpdateField(userID, "name", req.Name)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "更新用户名失败")
 		return
 	}
-	response.Success(c, gin.H{
-		"id":   user.ID,
-		"name": user.Name,
-	}, "更新用户名成功")
+	response.Success(c, gin.H{"id": user.ID, "name": user.Name}, "更新用户名成功")
+}
+
+func (h *UserHandler) UpdatePassword(c *gin.Context) {
+	type UpdatePasswordRequest struct {
+		Password    string `json:"password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required"`
+	}
+	var req UpdatePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+	user, err := h.userService.GetByID(userID)
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "用户不存在")
+		return
+	}
+	if err := security.CheckPassword(user.Password, req.Password); err != nil {
+		response.Error(c, http.StatusUnauthorized, "原密码错误")
+		return
+	}
+	updatedUser, err := h.userService.UpdatePassword(userID, req.NewPassword)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "更新密码失败")
+		return
+	}
+	response.Success(c, gin.H{"id": updatedUser.ID}, "更新密码成功")
 }

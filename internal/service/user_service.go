@@ -8,14 +8,16 @@ import (
 	"strconv"
 )
 
-// ----------用户service 接口----------
+// ----------用户 service 接口----------
 type UserService interface {
 	Register(user *model.User) error
 	DeleteAll() error
 	AddTestUser() error
 	Login(account, password string) (*model.User, error)
-	UpdateAvatar(userID uint, avatar string) (*model.User, error)
-	UpdateName(userID uint, name string) (*model.User, error)
+	GetByID(id uint) (*model.User, error)
+	UpdateField(userID uint, field string, value interface{}) (*model.User, error)
+	UpdatePassword(userID uint, password string) (*model.User, error)
+	GetSelf(userID uint) (*model.User, error)
 }
 
 // ----------用户service 实现----------
@@ -79,10 +81,22 @@ func (s *userService) Login(account, password string) (*model.User, error) {
 	return user, nil
 }
 
-func (s *userService) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
-	return s.userRepo.UpdateAvatar(userID, avatar)
+func (s *userService) GetByID(id uint) (*model.User, error) {
+	return s.userRepo.GetByID(id)
 }
 
-func (s *userService) UpdateName(userID uint, name string) (*model.User, error) {
-	return s.userRepo.UpdateName(userID, name)
+func (s *userService) UpdateField(userID uint, field string, value interface{}) (*model.User, error) {
+	return s.userRepo.UpdateField(userID, field, value)
+}
+
+func (s *userService) UpdatePassword(userID uint, password string) (*model.User, error) {
+	hashedPassword, err := security.HashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+	return s.userRepo.UpdateField(userID, "password", hashedPassword)
+}
+
+func (s *userService) GetSelf(userID uint) (*model.User, error) {
+	return s.userRepo.GetSelf(userID)
 }
