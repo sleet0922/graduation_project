@@ -71,42 +71,27 @@ func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 }
 
 func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("id = ?", userID).First(&user).Error
+	err := r.db.Model(&model.User{}).Where("id = ?", userID).Update("avatar", avatar).Error
 	if err != nil {
 		return nil, err
 	}
-	err = r.db.Model(&user).Update("avatar", avatar).Error
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+	return r.GetByID(userID)
 }
 
 func (r *userRepository) UpdateName(userID uint, name string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("id = ?", userID).First(&user).Error
+	err := r.db.Model(&model.User{}).Where("id = ?", userID).Update("name", name).Error
 	if err != nil {
 		return nil, err
 	}
-	err = r.db.Model(&user).Update("name", name).Error
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+	return r.GetByID(userID)
 }
 
 func (r *userRepository) UpdatePassword(userID uint, password string) (*model.User, error) {
-	var user model.User
-	err := r.db.Where("id = ?", userID).First(&user).Error
+	err := r.db.Model(&model.User{}).Where("id = ?", userID).Update("password", password).Error
 	if err != nil {
 		return nil, err
 	}
-	err = r.db.Model(&user).Update("password", password).Error
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+	return r.GetByID(userID)
 }
 
 func (r *userRepository) GetSelf(userID uint) (*model.User, error) {

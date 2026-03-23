@@ -24,7 +24,7 @@ func NewFriendService(repo repo.FriendRepository) FriendService {
 
 func (s *friendService) SendFriendRequest(senderID, receiverID uint) error {
 	exists, err := s.friendRepo.CheckRequestExists(senderID, receiverID)
-	if err != nil && err.Error() != "record not found" {
+	if err != nil {
 		return err
 	}
 	if exists {
@@ -46,28 +46,12 @@ func (s *friendService) HandleFriendRequest(requestID uint, status uint) error {
 	if request.Status != 0 {
 		return nil
 	}
-	request.Status = status
-	err = s.friendRepo.UpdateRequestStatus(request)
-	if err != nil {
-		return err
-	}
 	if status == 1 {
-		err = s.friendRepo.Create(&model.Friend{
-			UserID:   request.SenderID,
-			FriendID: request.ReceiverID,
-		})
-		if err != nil {
-			return err
-		}
-		err = s.friendRepo.Create(&model.Friend{
-			UserID:   request.ReceiverID,
-			FriendID: request.SenderID,
-		})
-		if err != nil {
-			return err
-		}
+		return s.friendRepo.AcceptFriendRequest(request)
+	} else {
+		request.Status = status
+		return s.friendRepo.UpdateRequestStatus(request)
 	}
-	return nil
 }
 
 func (s *friendService) GetFriendRequestsByUserID(userID uint) ([]*model.FriendRequest, error) {
@@ -75,17 +59,7 @@ func (s *friendService) GetFriendRequestsByUserID(userID uint) ([]*model.FriendR
 }
 
 func (s *friendService) RemoveFriend(userID, friendID uint) error {
-	err := s.friendRepo.Delete(&model.Friend{
-		UserID:   userID,
-		FriendID: friendID,
-	})
-	if err != nil {
-		return err
-	}
-	return s.friendRepo.Delete(&model.Friend{
-		UserID:   friendID,
-		FriendID: userID,
-	})
+	return s.friendRepo.RemoveBothFriends(userID, friendID)
 }
 
 func (s *friendService) GetByUserID(userID uint) ([]*model.Friend, error) {
@@ -95,4 +69,3 @@ func (s *friendService) GetByUserID(userID uint) ([]*model.Friend, error) {
 func (s *friendService) CheckFriendship(userID uint, friendID uint) bool {
 	return s.friendRepo.CheckFriendship(userID, friendID)
 }
-

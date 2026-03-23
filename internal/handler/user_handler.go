@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/jwt"
@@ -38,7 +39,7 @@ func (h *UserHandler) GetSelf(c *gin.Context) {
 func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
 	userID, exists := c.Get("user_id")
 	if !exists {
-		return 0, nil
+		return 0, fmt.Errorf("user_id not found in context")
 	}
 	return userID.(uint), nil
 }
@@ -62,7 +63,12 @@ func (h *UserHandler) Register(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "注册失败")
 		return
 	}
-	response.Success(c, user, "注册成功")
+	response.Success(c, gin.H{
+		"id":      user.ID,
+		"account": user.Account,
+		"name":    user.Name,
+		"phone":   user.Phone,
+	}, "注册成功")
 }
 
 func (h *UserHandler) Login(c *gin.Context) {

@@ -16,6 +16,8 @@ type FriendRepository interface {
 	GetRequestByID(requestID uint) (*model.FriendRequest, error)
 	UpdateRequestStatus(request *model.FriendRequest) error
 	GetRequestsByReceiverID(receiverID uint) ([]*model.FriendRequest, error)
+	AcceptFriendRequest(request *model.FriendRequest) error
+	RemoveBothFriends(userID, friendID uint) error
 }
 
 type friendRepository struct {
@@ -73,4 +75,32 @@ func (r *friendRepository) GetRequestsByReceiverID(receiverID uint) ([]*model.Fr
 	var requests []*model.FriendRequest
 	err := r.db.Where("receiver_id = ?", receiverID).Find(&requests).Error
 	return requests, err
+}
+
+func (r *friendRepository) AcceptFriendRequest(request *model.FriendRequest) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		request.Status = 1
+		if err := tx.Save(request).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.Friend{UserID: request.SenderID, FriendID: request.ReceiverID}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.Friend{UserID: request.ReceiverID, FriendID: request.SenderID}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (r *friendRepository) RemoveBothFriends(userID, friendID uint) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND friend_id = ?", userID, friendID).Delete(&model.Friend{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND friend_id = ?", friendID, userID).Delete(&model.Friend{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }

@@ -4,9 +4,9 @@ import "gorm.io/gorm"
 
 type Friend struct {
 	gorm.Model
-	UserID   uint `gorm:"index"`
-	FriendID uint `gorm:"index"`
-	Remark   string 
+	UserID   uint `gorm:"uniqueIndex:idx_user_friend"`
+	FriendID uint `gorm:"uniqueIndex:idx_user_friend"`
+	Remark   string
 }
 
 func (Friend) TableName() string {
