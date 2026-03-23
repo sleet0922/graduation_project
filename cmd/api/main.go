@@ -10,10 +10,8 @@ import (
 )
 
 func main() {
-	// 设置全局日志格式，包含日期、时间以及文件名和行号
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	// 初始化配置
 	cfg := config.InitConfig()
 	gin.SetMode(cfg.Server.Mode)
 	database := db.InitDB(cfg)

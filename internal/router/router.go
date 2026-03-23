@@ -41,8 +41,10 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
 	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
 	r.POST("/api/user/self", jwtMiddleware.Auth(), userHandler.GetSelf)
-	r.POST("/api/friend", jwtMiddleware.Auth(), friendHandler.Create)
-	r.DELETE("/api/friend", jwtMiddleware.Auth(), friendHandler.Delete)
+	r.POST("/api/friend/request", jwtMiddleware.Auth(), friendHandler.Create)
+	r.GET("/api/friend/requests", jwtMiddleware.Auth(), friendHandler.GetFriendRequests)
+	r.POST("/api/friend/handle", jwtMiddleware.Auth(), friendHandler.HandleFriendRequest)
+	r.POST("/api/friend/delete", jwtMiddleware.Auth(), friendHandler.Delete)
 	r.GET("/api/friend/list", jwtMiddleware.Auth(), friendHandler.GetByUserID)
 	r.POST("/api/friend/check", jwtMiddleware.Auth(), friendHandler.CheckFriendship)
 	return r
