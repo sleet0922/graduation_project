@@ -5,18 +5,16 @@ import (
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/security"
-	"strconv"
 )
 
 // ----------用户 service 接口----------
 type UserService interface {
-	Register(user *model.User) error
-	DeleteAll() error
-	AddTestUser() error
+	Register(name, account, password, phone string) (*model.User, error)
 	Login(account, password string) (*model.User, error)
 	GetByID(id uint) (*model.User, error)
-	UpdateField(userID uint, field string, value interface{}) (*model.User, error)
-	UpdatePassword(userID uint, password string) (*model.User, error)
+	UpdateAvatar(userID uint, avatar string) (*model.User, error)
+	UpdateName(userID uint, name string) (*model.User, error)
+	UpdatePassword(userID uint, oldPassword, newPassword string) error
 	GetSelf(userID uint) (*model.User, error)
 }
 
@@ -31,40 +29,22 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 }
 
 // ----------用户service 方法----------
-func (s *userService) Register(user *model.User) error {
-	hashedPassword, err := security.HashPassword(user.Password)
+func (s *userService) Register(name, account, password, phone string) (*model.User, error) {
+	hashedPassword, err := security.HashPassword(password)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	user.Password = hashedPassword
-	return s.userRepo.Add(user)
-}
-
-func (s *userService) DeleteAll() error {
-	return s.userRepo.DeleteAll()
-}
-
-func (s *userService) AddTestUser() error {
-
-	// 循环10次
-	for i := 0; i < 10; i++ {
-		user := &model.User{
-			Name:       "sleet" + strconv.Itoa(i),
-			Account:    "test" + strconv.Itoa(i),
-			Password:   "123456",
-			Phone:      "13800000000" + strconv.Itoa(i),
-			Avatar:     "https://example.com/avatar.jpg",
-			Gender:     0,
-			Birthday:   "2000-01-01",
-			Location:   "北京",
-			UserStatus: 0,
-		}
-		err := s.Register(user)
-		if err != nil {
-			return err
-		}
+	user := &model.User{
+		Name:     name,
+		Account:  account,
+		Password: hashedPassword,
+		Phone:    phone,
 	}
-	return nil
+	err = s.userRepo.Add(user)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func (s *userService) Login(account, password string) (*model.User, error) {
@@ -85,16 +65,28 @@ func (s *userService) GetByID(id uint) (*model.User, error) {
 	return s.userRepo.GetByID(id)
 }
 
-func (s *userService) UpdateField(userID uint, field string, value interface{}) (*model.User, error) {
-	return s.userRepo.UpdateField(userID, field, value)
+func (s *userService) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
+	return s.userRepo.UpdateAvatar(userID, avatar)
 }
 
-func (s *userService) UpdatePassword(userID uint, password string) (*model.User, error) {
-	hashedPassword, err := security.HashPassword(password)
+func (s *userService) UpdateName(userID uint, name string) (*model.User, error) {
+	return s.userRepo.UpdateName(userID, name)
+}
+
+func (s *userService) UpdatePassword(userID uint, oldPassword, newPassword string) error {
+	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
-		return nil, err
+		return errors.New("用户不存在")
 	}
-	return s.userRepo.UpdateField(userID, "password", hashedPassword)
+	if err := security.CheckPassword(user.Password, oldPassword); err != nil {
+		return errors.New("原密码错误")
+	}
+	hashedPassword, err := security.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	_, err = s.userRepo.UpdatePassword(userID, hashedPassword)
+	return err
 }
 
 func (s *userService) GetSelf(userID uint) (*model.User, error) {

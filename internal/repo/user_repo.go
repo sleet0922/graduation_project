@@ -10,12 +10,12 @@ type UserRepository interface {
 	Add(user *model.User) error
 	Delete(id uint) error
 	Update(user *model.User) error
-	DeleteAll() error
-	AddTestUser() error
 	GetByID(id uint) (*model.User, error)
 	GetByAccount(account string) (*model.User, error)
 	GetByPhone(phone string) (*model.User, error)
-	UpdateField(userID uint, field string, value interface{}) (*model.User, error)
+	UpdateAvatar(userID uint, avatar string) (*model.User, error)
+	UpdateName(userID uint, name string) (*model.User, error)
+	UpdatePassword(userID uint, password string) (*model.User, error)
 	GetSelf(userID uint) (*model.User, error)
 }
 
@@ -38,29 +38,8 @@ func (r *userRepository) Delete(id uint) error {
 	return r.db.Delete(&model.User{}, id).Error
 }
 
-// 更新用户
 func (r *userRepository) Update(user *model.User) error {
 	return r.db.Save(user).Error
-}
-
-// 删除所有用户
-func (r *userRepository) DeleteAll() error {
-	return r.db.Unscoped().Where("1=1").Delete(&model.User{}).Error
-}
-
-// 添加测试用户
-func (r *userRepository) AddTestUser() error {
-	return r.db.Create(&model.User{
-		Name:       "sleet",
-		Account:    "943781228",
-		Password:   "Zyz20050922!",
-		Phone:      "13915181300",
-		Avatar:     "https://example.com/avatar.jpg",
-		Gender:     1,
-		Birthday:   "2006-05-28",
-		Location:   "江苏",
-		UserStatus: 0,
-	}).Error
 }
 
 func (r *userRepository) GetByID(id uint) (*model.User, error) {
@@ -91,13 +70,39 @@ func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
 	return &user, nil
 }
 
-func (r *userRepository) UpdateField(userID uint, field string, value interface{}) (*model.User, error) {
+func (r *userRepository) UpdateAvatar(userID uint, avatar string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("id = ?", userID).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
-	err = r.db.Model(&user).Update(field, value).Error
+	err = r.db.Model(&user).Update("avatar", avatar).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) UpdateName(userID uint, name string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("id = ?", userID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.Model(&user).Update("name", name).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) UpdatePassword(userID uint, password string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("id = ?", userID).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.Model(&user).Update("password", password).Error
 	if err != nil {
 		return nil, err
 	}

@@ -35,7 +35,7 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	err = db.AutoMigrate(&model.User{})
+	err = db.AutoMigrate(&model.User{}, &model.Friend{})
 	if err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}

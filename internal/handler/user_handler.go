@@ -2,11 +2,9 @@ package handler
 
 import (
 	"net/http"
-	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/jwt"
 	"sleet0922/graduation_project/pkg/response"
-	"sleet0922/graduation_project/pkg/security"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -59,37 +57,12 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user := &model.User{
-		Name:     req.Name,
-		Account:  req.Account,
-		Password: req.Password,
-		Phone:    req.Phone,
-	}
-
-	err = h.userService.Register(user)
+	user, err := h.userService.Register(req.Name, req.Account, req.Password, req.Phone)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "注册失败")
 		return
 	}
 	response.Success(c, user, "注册成功")
-}
-
-func (h *UserHandler) DeleteAll(c *gin.Context) {
-	err := h.userService.DeleteAll()
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "删除所有用户失败")
-		return
-	}
-	response.Success(c, nil, "删除所有用户成功")
-}
-
-func (h *UserHandler) AddTestUser(c *gin.Context) {
-	err := h.userService.AddTestUser()
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "添加测试用户失败")
-		return
-	}
-	response.Success(c, nil, "添加测试用户成功")
 }
 
 func (h *UserHandler) Login(c *gin.Context) {
@@ -145,7 +118,7 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
 		return
 	}
-	user, err := h.userService.UpdateField(userID, "avatar", req.ObjectKey)
+	user, err := h.userService.UpdateAvatar(userID, req.ObjectKey)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "更新头像失败")
 		return
@@ -167,7 +140,7 @@ func (h *UserHandler) UpdateName(c *gin.Context) {
 		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
 		return
 	}
-	user, err := h.userService.UpdateField(userID, "name", req.Name)
+	user, err := h.userService.UpdateName(userID, req.Name)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "更新用户名失败")
 		return
@@ -190,19 +163,10 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
 		return
 	}
-	user, err := h.userService.GetByID(userID)
+	err = h.userService.UpdatePassword(userID, req.Password, req.NewPassword)
 	if err != nil {
-		response.Error(c, http.StatusNotFound, "用户不存在")
+		response.Error(c, http.StatusUnauthorized, err.Error())
 		return
 	}
-	if err := security.CheckPassword(user.Password, req.Password); err != nil {
-		response.Error(c, http.StatusUnauthorized, "原密码错误")
-		return
-	}
-	updatedUser, err := h.userService.UpdatePassword(userID, req.NewPassword)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "更新密码失败")
-		return
-	}
-	response.Success(c, gin.H{"id": updatedUser.ID}, "更新密码成功")
+	response.Success(c, nil, "更新密码成功")
 }

@@ -28,6 +28,9 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	userService := service.NewUserService(userRepo)
 	userHandler := handler.NewUserHandler(userService, jwtManager)
 	ossHandler := handler.NewOssHandler(cfg)
+	friendRepo := repo.NewFriendRepository(db)
+	friendService := service.NewFriendService(friendRepo)
+	friendHandler := handler.NewFriendHandler(friendService, jwtManager)
 
 	// api 路由
 	r.POST("/api/user/register", userHandler.Register)
@@ -35,10 +38,12 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.GET("/api/oss/upload-url", ossHandler.GetUploadURL)
 	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
 	r.POST("/api/user/avatar", jwtMiddleware.Auth(), userHandler.UpdateAvatar)
-	r.POST("/api/delete_all", userHandler.DeleteAll)
-	r.POST("/api/add_test_user", userHandler.AddTestUser)
 	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
 	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
 	r.POST("/api/user/self", jwtMiddleware.Auth(), userHandler.GetSelf)
+	r.POST("/api/friend", jwtMiddleware.Auth(), friendHandler.Create)
+	r.DELETE("/api/friend", jwtMiddleware.Auth(), friendHandler.Delete)
+	r.GET("/api/friend/list", jwtMiddleware.Auth(), friendHandler.GetByUserID)
+	r.POST("/api/friend/check", jwtMiddleware.Auth(), friendHandler.CheckFriendship)
 	return r
 }

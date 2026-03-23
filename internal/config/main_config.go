@@ -16,17 +16,16 @@ type DatabaseConfig struct {
 }
 
 type GinPortConfig struct {
-	Port         string `json:"port"`
-	Mode_Debug   string `json:"mode_debug"`
-	Mode_Release string `json:"mode_release"`
+	Port string `json:"port"`
+	Mode string `json:"mode"`
 }
 
-type COSConfig struct {
-	SecretID  string `json:"secret_id" mapstructure:"secret_id"`
-	SecretKey string `json:"secret_key" mapstructure:"secret_key"`
-	Bucket    string `json:"bucket" mapstructure:"bucket"`
-	Region    string `json:"region" mapstructure:"region"`
-	BasePath  string `json:"base_path" mapstructure:"base_path"`
+type OSSConfig struct {
+	AccessKeyID     string `json:"access_key_id" mapstructure:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key" mapstructure:"secret_access_key"`
+	Bucket          string `json:"bucket" mapstructure:"bucket"`
+	Endpoint        string `json:"endpoint" mapstructure:"endpoint"`
+	BasePath        string `json:"base_path" mapstructure:"base_path"`
 }
 
 type JWTConfig struct {
@@ -36,7 +35,7 @@ type JWTConfig struct {
 type ViperConfig struct {
 	Server   GinPortConfig  `json:"server"`
 	Database DatabaseConfig `json:"database"`
-	Cos      COSConfig      `json:"cos" mapstructure:"cos"`
+	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
 }
 

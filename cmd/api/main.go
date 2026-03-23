@@ -15,7 +15,7 @@ func main() {
 
 	// 初始化配置
 	cfg := config.InitConfig()
-	gin.SetMode(cfg.Server.Mode_Release)
+	gin.SetMode(cfg.Server.Mode)
 	database := db.InitDB(cfg)
 	r := router.InitRouter(database, cfg)
 

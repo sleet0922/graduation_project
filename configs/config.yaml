@@ -1,7 +1,6 @@
 server:
   port: ":8081"
-  mode_debug: "debug"
-  mode_release: "release"
+  mode: "debug"
 
 database:
   username: "root"
@@ -11,12 +10,12 @@ database:
   dbname: "graduation_project"
   charset: "utf8mb4"
 
-cos:
-  secret_id: "AKID2wd8QVWKvKVXMI6j9MNCoDUZ8Up25xfJ"
-  secret_key: "WpxtcCcpsBRbeeWH4mNtGc2Mdu4FH9rQ"
-  bucket: "gelsomino-1313022211"
-  region: "ap-nanjing"
-  base_path: ""
+oss:
+  access_key_id: "f7077ffaba23ec48af7b0a492701126d"
+  secret_access_key: "5b70748ffc99052961e06324a290258408b429f1f4c4ab93548736718e3e0679"
+  bucket: "sleet"
+  endpoint: "https://853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com"
+  base_path: "sleet"
 
 jwt:
   secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"
