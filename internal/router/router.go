@@ -18,6 +18,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	// 添加中间件
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
+	r.Use(middleware.CorsMiddleware())
 
 	// 初始化JWT
 	jwtManager := jwt.NewJWTManager(cfg.JWT.SecretKey)

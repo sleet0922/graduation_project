@@ -2,14 +2,17 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"math/rand"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/security"
+	"time"
 )
 
 // ----------用户 service 接口----------
 type UserService interface {
-	Register(name, account, password, phone string) (*model.User, error)
+	Register(email, password string) (*model.User, error)
 	Login(account, password string) (*model.User, error)
 	GetByID(id uint) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
@@ -29,22 +32,35 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 }
 
 // ----------用户service 方法----------
-func (s *userService) Register(name, account, password, phone string) (*model.User, error) {
+func (s *userService) Register(email, password string) (*model.User, error) {
+	account := s.generateRandomAccount()
 	hashedPassword, err := security.HashPassword(password)
 	if err != nil {
 		return nil, err
 	}
 	user := &model.User{
-		Name:     name,
+		Name:     "未命名用户",
 		Account:  account,
 		Password: hashedPassword,
-		Phone:    phone,
+		Email:    email,
 	}
 	err = s.userRepo.Add(user)
 	if err != nil {
 		return nil, err
 	}
 	return user, nil
+}
+
+func (s *userService) generateRandomAccount() string {
+	for i := 0; i < 100; i++ {
+		account := fmt.Sprintf("%010d", rand.Intn(10000000000))
+		_, err := s.userRepo.GetByAccount(account)
+		if err != nil {
+			return account
+		}
+	}
+	// Fallback: use timestamp + random suffix to guarantee uniqueness
+	return fmt.Sprintf("%010d", time.Now().UnixNano()%10000000000)
 }
 
 func (s *userService) Login(account, password string) (*model.User, error) {

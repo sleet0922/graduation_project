@@ -48,10 +48,8 @@ func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
 }
 func (h *UserHandler) Register(c *gin.Context) {
 	type RegisterRequest struct {
-		Name     string `json:"name" binding:"required"`
-		Account  string `json:"account" binding:"required"`
+		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
-		Phone    string `json:"phone" binding:"required"`
 	}
 
 	var req RegisterRequest
@@ -61,7 +59,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.Register(req.Name, req.Account, req.Password, req.Phone)
+	user, err := h.userService.Register(req.Email, req.Password)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "注册失败")
 		return
@@ -70,7 +68,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		"id":      user.ID,
 		"account": user.Account,
 		"name":    user.Name,
-		"phone":   user.Phone,
+		"email":   user.Email,
 	}, "注册成功")
 }
 
@@ -105,7 +103,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 			"account":  user.Account,
 			"name":     user.Name,
 			"avatar":   user.Avatar,
-			"phone":    user.Phone,
+			"email":    user.Email,
 			"gender":   user.Gender,
 			"birthday": user.Birthday,
 			"location": user.Location,

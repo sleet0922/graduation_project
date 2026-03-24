@@ -12,24 +12,21 @@ type UserRepository interface {
 	Update(user *model.User) error
 	GetByID(id uint) (*model.User, error)
 	GetByAccount(account string) (*model.User, error)
-	GetByPhone(phone string) (*model.User, error)
+	GetByEmail(email string) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
 	UpdateName(userID uint, name string) (*model.User, error)
 	UpdatePassword(userID uint, password string) (*model.User, error)
 	GetSelf(userID uint) (*model.User, error)
 }
 
-// ----------数据库操作层 实现----------
 type userRepository struct {
 	db *gorm.DB
 }
 
-// ----------数据库操作层 构造函数----------
 func NewUserRepository(db *gorm.DB) UserRepository {
 	return &userRepository{db: db}
 }
 
-// ----------数据库操作层 方法----------
 func (r *userRepository) Add(user *model.User) error {
 	return r.db.Create(user).Error
 }
@@ -51,7 +48,6 @@ func (r *userRepository) GetByID(id uint) (*model.User, error) {
 	return &user, nil
 }
 
-// 根据账号获取用户
 func (r *userRepository) GetByAccount(account string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("account = ?", account).First(&user).Error
@@ -61,9 +57,9 @@ func (r *userRepository) GetByAccount(account string) (*model.User, error) {
 	return &user, nil
 }
 
-func (r *userRepository) GetByPhone(phone string) (*model.User, error) {
+func (r *userRepository) GetByEmail(email string) (*model.User, error) {
 	var user model.User
-	err := r.db.Where("phone = ?", phone).First(&user).Error
+	err := r.db.Where("email = ?", email).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
