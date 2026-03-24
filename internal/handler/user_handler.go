@@ -39,6 +39,31 @@ func (h *UserHandler) GetSelf(c *gin.Context) {
 	response.Success(c, user, "获取用户信息成功")
 }
 
+func (h *UserHandler) SearchUser(c *gin.Context) {
+	keyword := c.Query("keyword")
+	if keyword == "" {
+		response.Error(c, http.StatusBadRequest, "缺少搜索关键字")
+		return
+	}
+
+	user, err := h.userService.SearchUser(keyword)
+	if err != nil {
+		response.Error(c, http.StatusNotFound, "未找到该用户")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"id":       user.ID,
+		"account":  user.Account,
+		"name":     user.Name,
+		"avatar":   user.Avatar,
+		"email":    user.Email,
+		"gender":   user.Gender,
+		"birthday": user.Birthday,
+		"location": user.Location,
+	}, "搜索用户成功")
+}
+
 func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
 	userID, exists := c.Get("user_id")
 	if !exists {

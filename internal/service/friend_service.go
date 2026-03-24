@@ -12,6 +12,7 @@ type FriendService interface {
 	GetFriendRequestsByUserID(userID uint) ([]*model.FriendRequest, error)
 	RemoveFriend(userID, friendID uint) error
 	GetByUserID(userID uint) ([]*model.Friend, error)
+	GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error)
 	CheckFriendship(userID uint, friendID uint) bool
 }
 
@@ -68,6 +69,10 @@ func (s *friendService) RemoveFriend(userID, friendID uint) error {
 
 func (s *friendService) GetByUserID(userID uint) ([]*model.Friend, error) {
 	return s.friendRepo.GetByUserID(userID)
+}
+
+func (s *friendService) GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error) {
+	return s.friendRepo.GetFriendDetailsByUserID(userID)
 }
 
 func (s *friendService) CheckFriendship(userID uint, friendID uint) bool {

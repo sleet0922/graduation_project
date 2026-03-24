@@ -7,6 +7,7 @@ import (
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/security"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,7 @@ import (
 type UserService interface {
 	Register(email, password string) (*model.User, error)
 	Login(account, password string) (*model.User, error)
+	SearchUser(keyword string) (*model.User, error)
 	GetByID(id uint) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
 	UpdateName(userID uint, name string) (*model.User, error)
@@ -64,7 +66,16 @@ func (s *userService) generateRandomAccount() string {
 }
 
 func (s *userService) Login(account, password string) (*model.User, error) {
-	user, err := s.userRepo.GetByAccount(account)
+	var user *model.User
+	var err error
+
+	// 判断是邮箱还是账号登录
+	if strings.Contains(account, "@") {
+		user, err = s.userRepo.GetByEmail(account)
+	} else {
+		user, err = s.userRepo.GetByAccount(account)
+	}
+
 	if err != nil {
 		return nil, errors.New("账号或密码错误")
 	}
@@ -74,6 +85,13 @@ func (s *userService) Login(account, password string) (*model.User, error) {
 		return nil, errors.New("账号或密码错误")
 	}
 	return user, nil
+}
+
+func (s *userService) SearchUser(keyword string) (*model.User, error) {
+	if strings.Contains(keyword, "@") {
+		return s.userRepo.GetByEmail(keyword)
+	}
+	return s.userRepo.GetByAccount(keyword)
 }
 
 func (s *userService) GetByID(id uint) (*model.User, error) {

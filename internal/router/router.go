@@ -31,7 +31,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	ossHandler := handler.NewOssHandler(cfg)
 	friendRepo := repo.NewFriendRepository(db)
 	friendService := service.NewFriendService(friendRepo)
-	friendHandler := handler.NewFriendHandler(friendService, jwtManager)
+	friendHandler := handler.NewFriendHandler(friendService, userService, jwtManager)
 
 	// api 路由
 	r.POST("/api/user/register", userHandler.Register)
@@ -42,6 +42,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
 	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
 	r.POST("/api/user/self", jwtMiddleware.Auth(), userHandler.GetSelf)
+	r.GET("/api/user/search", userHandler.SearchUser)
 	r.POST("/api/friend/request", jwtMiddleware.Auth(), friendHandler.Create)
 	r.GET("/api/friend/requests", jwtMiddleware.Auth(), friendHandler.GetFriendRequests)
 	r.POST("/api/friend/handle", jwtMiddleware.Auth(), friendHandler.HandleFriendRequest)

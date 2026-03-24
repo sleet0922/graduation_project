@@ -12,13 +12,15 @@ import (
 
 type FriendHandler struct {
 	friendService service.FriendService
+	userService   service.UserService
 	jwtManager    *jwt.JWTManager
 }
 
 // ----------好友 handler 构造函数----------
-func NewFriendHandler(friendService service.FriendService, jwtManager *jwt.JWTManager) *FriendHandler {
+func NewFriendHandler(friendService service.FriendService, userService service.UserService, jwtManager *jwt.JWTManager) *FriendHandler {
 	return &FriendHandler{
 		friendService: friendService,
+		userService:   userService,
 		jwtManager:    jwtManager,
 	}
 }
@@ -26,7 +28,8 @@ func NewFriendHandler(friendService service.FriendService, jwtManager *jwt.JWTMa
 // ----------好友 handler 方法----------
 func (h *FriendHandler) Create(c *gin.Context) {
 	type CreateFriendRequest struct {
-		FriendID uint `json:"friend_id" binding:"required"`
+		FriendID uint   `json:"friend_id"`
+		Account  string `json:"account"` // 可选：通过账号或邮箱添加
 	}
 
 	var req CreateFriendRequest
@@ -42,7 +45,24 @@ func (h *FriendHandler) Create(c *gin.Context) {
 		return
 	}
 
-	err = h.friendService.SendFriendRequest(userID, req.FriendID)
+	friendID := req.FriendID
+
+	// 如果提供了 account，则去查找对应的 friend_id
+	if req.Account != "" {
+		user, err := h.userService.SearchUser(req.Account)
+		if err != nil {
+			response.Error(c, http.StatusNotFound, "未找到该用户")
+			return
+		}
+		friendID = user.ID
+	}
+
+	if friendID == 0 {
+		response.Error(c, http.StatusBadRequest, "缺少有效的好友信息")
+		return
+	}
+
+	err = h.friendService.SendFriendRequest(userID, friendID)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "发送好友申请失败")
 		return
@@ -85,13 +105,13 @@ func (h *FriendHandler) GetByUserID(c *gin.Context) {
 		return
 	}
 
-	friends, err := h.friendService.GetByUserID(userID)
+	friendDetails, err := h.friendService.GetFriendDetailsByUserID(userID)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "获取好友列表失败")
 		return
 	}
 
-	response.Success(c, friends, "获取好友列表成功")
+	response.Success(c, friendDetails, "获取好友列表成功")
 }
 
 func (h *FriendHandler) GetFriendRequests(c *gin.Context) {

@@ -10,6 +10,7 @@ type FriendRepository interface {
 	Create(friend *model.Friend) error
 	Delete(friend *model.Friend) error
 	GetByUserID(userID uint) ([]*model.Friend, error)
+	GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error)
 	CheckFriendship(userID uint, friendID uint) bool
 	SendFriendRequest(friendRequest *model.FriendRequest) error
 	CheckRequestExists(senderID, receiverID uint) (bool, error)
@@ -43,6 +44,16 @@ func (r *friendRepository) GetByUserID(userID uint) ([]*model.Friend, error) {
 	var friends []*model.Friend
 	err := r.db.Where("user_id = ?", userID).Find(&friends).Error
 	return friends, err
+}
+
+func (r *friendRepository) GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error) {
+	var friendDetails []*model.FriendDetail
+	err := r.db.Table("friend").
+		Select("friend.id, friend.user_id, friend.friend_id, friend.remark, user.account, user.name, user.email, user.avatar, user.gender, user.birthday, user.location").
+		Joins("LEFT JOIN user ON friend.friend_id = user.id").
+		Where("friend.user_id = ?", userID).
+		Find(&friendDetails).Error
+	return friendDetails, err
 }
 
 func (r *friendRepository) CheckFriendship(userID uint, friendID uint) bool {
