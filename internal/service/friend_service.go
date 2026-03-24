@@ -1,8 +1,15 @@
 package service
 
 import (
+	"errors"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
+)
+
+var (
+	ErrCannotAddSelf = errors.New("不能添加自己为好友")
+	ErrAlreadyFriend = errors.New("你们已经是好友了")
+	ErrRequestExists = errors.New("好友申请已存在")
 )
 
 // ----------好友 service 接口----------
@@ -28,12 +35,20 @@ func NewFriendService(repo repo.FriendRepository) FriendService {
 
 // ----------好友 service 方法----------
 func (s *friendService) SendFriendRequest(senderID, receiverID uint) error {
+	if senderID == receiverID {
+		return ErrCannotAddSelf
+	}
+
+	if s.friendRepo.CheckFriendship(senderID, receiverID) {
+		return ErrAlreadyFriend
+	}
+
 	exists, err := s.friendRepo.CheckRequestExists(senderID, receiverID)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return nil
+		return ErrRequestExists
 	}
 	friendRequest := &model.FriendRequest{
 		SenderID:   senderID,

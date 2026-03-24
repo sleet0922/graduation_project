@@ -274,7 +274,8 @@ curl -X GET "http://localhost:8081/api/oss/download-url?key=test.jpg"
 ```bash
 curl -X POST http://localhost:8081/api/friend/request \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \  -d '{
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
     "account": "sleet0528@outlook"
   }'
 ```
@@ -293,6 +294,29 @@ curl -X POST http://localhost:8081/api/friend/request \
   "code": 200,
   "data": null,
   "message": "好友申请已发送"
+}
+```
+
+**边界场景响应:**
+```json
+{
+  "code": 400,
+  "data": null,
+  "message": "不能添加自己为好友"
+}
+```
+```json
+{
+  "code": 400,
+  "data": null,
+  "message": "你们已经是好友了"
+}
+```
+```json
+{
+  "code": 400,
+  "data": null,
+  "message": "好友申请已存在"
 }
 ```
 
@@ -398,7 +422,7 @@ curl -X POST http://localhost:8081/api/friend/check \
     "is_friend": false
   },
   "message": "检查好友关系成功"
-}Q
+}
 ```
 
 ---
@@ -458,6 +482,9 @@ curl -X POST http://localhost:8081/api/friend/request -H "Content-Type: applicat
 - 注册时账号由系统自动生成 10 位随机数字
 - 邮箱用于登录，账号用于搜索好友
 - 搜索用户接口不需要认证，可以公开调用
+- 加好友时如果目标用户是自己，会返回 `不能添加自己为好友`
+- 加好友时如果双方已经是好友，会返回 `你们已经是好友了`
+- 加好友时如果存在未处理的申请（任一方向），会返回 `好友申请已存在`
 - 需要先注册并登录获取 token 才能测试需要认证的 API
 - 好友功能需要至少注册两个用户进行测试
 - 好友列表接口返回好友的详细信息（名字、账号、邮箱、头像等）

@@ -68,7 +68,10 @@ func (r *friendRepository) SendFriendRequest(friendRequest *model.FriendRequest)
 
 func (r *friendRepository) CheckRequestExists(senderID, receiverID uint) (bool, error) {
 	var count int64
-	err := r.db.Where("sender_id = ? AND receiver_id = ? AND status = 0", senderID, receiverID).Model(&model.FriendRequest{}).Count(&count).Error
+	err := r.db.Where(
+		"status = 0 AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+		senderID, receiverID, receiverID, senderID,
+	).Model(&model.FriendRequest{}).Count(&count).Error
 	if err != nil {
 		return false, err
 	}

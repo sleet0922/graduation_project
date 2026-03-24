@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
@@ -64,6 +65,10 @@ func (h *FriendHandler) Create(c *gin.Context) {
 
 	err = h.friendService.SendFriendRequest(userID, friendID)
 	if err != nil {
+		if errors.Is(err, service.ErrCannotAddSelf) || errors.Is(err, service.ErrAlreadyFriend) || errors.Is(err, service.ErrRequestExists) {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "发送好友申请失败")
 		return
 	}
