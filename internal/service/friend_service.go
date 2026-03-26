@@ -21,6 +21,7 @@ type FriendService interface {
 	GetByUserID(userID uint) ([]*model.Friend, error)
 	GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error)
 	CheckFriendship(userID uint, friendID uint) bool
+	UpdateRemark(userID, friendID uint, remark string) error
 }
 
 // ----------好友 service 实现----------
@@ -92,4 +93,8 @@ func (s *friendService) GetFriendDetailsByUserID(userID uint) ([]*model.FriendDe
 
 func (s *friendService) CheckFriendship(userID uint, friendID uint) bool {
 	return s.friendRepo.CheckFriendship(userID, friendID)
+}
+
+func (s *friendService) UpdateRemark(userID, friendID uint, remark string) error {
+	return s.friendRepo.UpdateRemark(userID, friendID, remark)
 }

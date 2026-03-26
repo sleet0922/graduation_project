@@ -11,6 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	accessTokenExpiresIn  = time.Hour * 24
+	refreshTokenExpiresIn = time.Hour * 24 * 30
+)
+
 type UserHandler struct {
 	userService service.UserService
 	jwtManager  *jwt.JWTManager
@@ -115,14 +120,22 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := h.jwtManager.GenerateToken(user.ID, user.Account, time.Hour*24)
+	accessToken, err := h.jwtManager.GenerateToken(user.ID, user.Account, accessTokenExpiresIn)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "生成token失败")
 		return
 	}
+	refreshToken, err := h.jwtManager.GenerateRefreshToken(user.ID, user.Account, refreshTokenExpiresIn)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "生成refresh token失败")
+		return
+	}
 
 	response.Success(c, gin.H{
-		"token": token,
+		"token":              accessToken,
+		"refresh_token":      refreshToken,
+		"expires_in":         int(accessTokenExpiresIn.Seconds()),
+		"refresh_expires_in": int(refreshTokenExpiresIn.Seconds()),
 		"user": gin.H{
 			"id":       user.ID,
 			"account":  user.Account,
@@ -134,6 +147,37 @@ func (h *UserHandler) Login(c *gin.Context) {
 			"location": user.Location,
 		},
 	}, "登录成功")
+}
+
+func (h *UserHandler) RefreshToken(c *gin.Context) {
+	type RefreshTokenRequest struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	var req RefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	accessToken, err := h.jwtManager.RefreshAccessToken(req.RefreshToken, accessTokenExpiresIn)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "refresh token无效")
+		return
+	}
+
+	refreshToken, err := h.jwtManager.RotateRefreshToken(req.RefreshToken, refreshTokenExpiresIn)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "refresh token无效")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"token":              accessToken,
+		"refresh_token":      refreshToken,
+		"expires_in":         int(accessTokenExpiresIn.Seconds()),
+		"refresh_expires_in": int(refreshTokenExpiresIn.Seconds()),
+	}, "刷新token成功")
 }
 
 func (h *UserHandler) UpdateAvatar(c *gin.Context) {
@@ -201,4 +245,33 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		return
 	}
 	response.Success(c, nil, "更新密码成功")
+}
+
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
+	type UpdateProfileRequest struct {
+		Gender   int    `json:"gender"`
+		Birthday string `json:"birthday"`
+		Location string `json:"location"`
+	}
+	var req UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+	user, err := h.userService.UpdateProfile(userID, req.Gender, req.Birthday, req.Location)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "更新资料失败")
+		return
+	}
+	response.Success(c, gin.H{
+		"id":       user.ID,
+		"gender":   user.Gender,
+		"birthday": user.Birthday,
+		"location": user.Location,
+	}, "更新资料成功")
 }

@@ -20,6 +20,7 @@ type UserService interface {
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
 	UpdateName(userID uint, name string) (*model.User, error)
 	UpdatePassword(userID uint, oldPassword, newPassword string) error
+	UpdateProfile(userID uint, gender int, birthday string, location string) (*model.User, error)
 	GetSelf(userID uint) (*model.User, error)
 }
 
@@ -120,6 +121,10 @@ func (s *userService) UpdatePassword(userID uint, oldPassword, newPassword strin
 	}
 	_, err = s.userRepo.UpdatePassword(userID, hashedPassword)
 	return err
+}
+
+func (s *userService) UpdateProfile(userID uint, gender int, birthday string, location string) (*model.User, error) {
+	return s.userRepo.UpdateProfile(userID, gender, birthday, location)
 }
 
 func (s *userService) GetSelf(userID uint) (*model.User, error) {

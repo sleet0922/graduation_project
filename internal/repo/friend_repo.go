@@ -19,6 +19,7 @@ type FriendRepository interface {
 	GetRequestsByReceiverID(receiverID uint) ([]*model.FriendRequest, error)
 	AcceptFriendRequest(request *model.FriendRequest) error
 	RemoveBothFriends(userID, friendID uint) error
+	UpdateRemark(userID, friendID uint, remark string) error
 }
 
 // ----------好友 repository 实现----------
@@ -120,4 +121,10 @@ func (r *friendRepository) RemoveBothFriends(userID, friendID uint) error {
 		}
 		return nil
 	})
+}
+
+func (r *friendRepository) UpdateRemark(userID, friendID uint, remark string) error {
+	return r.db.Model(&model.Friend{}).
+		Where("user_id = ? AND friend_id = ?", userID, friendID).
+		Update("remark", remark).Error
 }

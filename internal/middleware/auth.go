@@ -43,6 +43,11 @@ func (m *JWTMiddleware) Auth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if claims.TokenType == jwt.TokenTypeRefresh {
+			response.Error(c, http.StatusUnauthorized, "token类型错误")
+			c.Abort()
+			return
+		}
 		c.Set("user_id", uint(claims.UserID))
 		c.Set("account", claims.Account)
 		c.Next()
@@ -65,6 +70,10 @@ func (m *JWTMiddleware) OptionalAuth() gin.HandlerFunc {
 		}
 		claims, err := m.jwtManager.ParseToken(parts[1])
 		if err != nil {
+			c.Next()
+			return
+		}
+		if claims.TokenType == jwt.TokenTypeRefresh {
 			c.Next()
 			return
 		}

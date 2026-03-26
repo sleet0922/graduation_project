@@ -16,6 +16,7 @@ type UserRepository interface {
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
 	UpdateName(userID uint, name string) (*model.User, error)
 	UpdatePassword(userID uint, password string) (*model.User, error)
+	UpdateProfile(userID uint, gender int, birthday string, location string) (*model.User, error)
 	GetSelf(userID uint) (*model.User, error)
 }
 
@@ -84,6 +85,18 @@ func (r *userRepository) UpdateName(userID uint, name string) (*model.User, erro
 
 func (r *userRepository) UpdatePassword(userID uint, password string) (*model.User, error) {
 	err := r.db.Model(&model.User{}).Where("id = ?", userID).Update("password", password).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.GetByID(userID)
+}
+
+func (r *userRepository) UpdateProfile(userID uint, gender int, birthday string, location string) (*model.User, error) {
+	err := r.db.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"gender":   gender,
+		"birthday": birthday,
+		"location": location,
+	}).Error
 	if err != nil {
 		return nil, err
 	}

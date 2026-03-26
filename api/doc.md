@@ -39,7 +39,7 @@ curl -X POST http://localhost:8081/api/user/register \
 curl -X POST http://localhost:8081/api/user/login \
   -H "Content-Type: application/json" \
   -d '{
-    "account": "sleet0528@outlook",
+    "account": "sleet0528@outlook.com",
     "password": "Zyz20050922!"
   }'
 ```
@@ -54,12 +54,15 @@ curl -X POST http://localhost:8081/api/user/login \
   "code": 200,
   "data": {
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "expires_in": 86400,
+    "refresh_expires_in": 2592000,
     "user": {
       "id": 8,
       "account": "0762353747",
       "name": "未命名用户",
       "avatar": "",
-      "email": "sleet0528@outlook",
+      "email": "sleet0528@outlook.com",
       "gender": 0,
       "birthday": "",
       "location": ""
@@ -73,15 +76,53 @@ curl -X POST http://localhost:8081/api/user/login \
 - 用户注册时，系统会自动生成一个10位随机数字账号作为唯一标识
 - 登录时可以使用注册时的邮箱或生成的账号
 - 账号主要用于好友搜索，邮箱主要用于登录
+- `token` 为 access token，默认有效期 1 天
+- `refresh_token` 用于续期 access token，默认有效期 30 天
 
 **保存 token 用于后续测试:**
 ```bash
 export TOKEN="你的token"
+export REFRESH_TOKEN="你的refresh_token"
 ```
 
 ---
 
-### 3. 获取用户信息（需要认证）
+### 3. 刷新 token
+
+```bash
+curl -X POST http://localhost:8081/api/user/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "'"$REFRESH_TOKEN"'"
+  }'
+```
+
+**请求参数:**
+- `refresh_token` (必填): 登录时返回的 refresh token
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": {
+    "token": "新的access token",
+    "refresh_token": "新的refresh token",
+    "expires_in": 86400,
+    "refresh_expires_in": 2592000
+  },
+  "message": "刷新token成功"
+}
+```
+
+**说明:**
+- 当 access token 过期时，客户端应调用该接口换取新 token
+- 刷新成功后，客户端需要同时更新本地保存的 `token` 和 `refresh_token`
+- 如果 refresh token 也过期了，才需要重新登录
+```
+
+---
+
+### 4. 获取用户信息（需要认证）
 
 ```bash
 curl -X POST http://localhost:8081/api/user/self \
@@ -219,6 +260,43 @@ curl -X POST http://localhost:8081/api/user/password_update \
 
 ---
 
+### 6. 更新用户资料（需要认证）
+
+```bash
+curl -X POST http://localhost:8081/api/user/profile_update \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "gender": 1,
+    "birthday": "2000-01-01",
+    "location": "北京"
+  }'
+```
+
+**请求头:**
+- `Authorization`: Bearer Token
+
+**请求参数:**
+- `gender` (可选): 性别 (0:未知, 1:男, 2:女)
+- `birthday` (可选): 生日字符串，如 "2000-01-01"
+- `location` (可选): 地区字符串
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 6,
+    "gender": 1,
+    "birthday": "2000-01-01",
+    "location": "北京"
+  },
+  "message": "更新资料成功"
+}
+```
+
+---
+
 ## OSS 相关 API
 
 ### 6. 获取上传 URL
@@ -342,10 +420,26 @@ curl -X GET http://localhost:8081/api/friend/requests \
 ```json
 {
   "code": 200,
-  "data": [],
+  "data": [
+    {
+      "ID": 1,
+      "CreatedAt": "2026-03-25T01:23:45Z",
+      "UpdatedAt": "2026-03-25T01:23:45Z",
+      "DeletedAt": null,
+      "sender_id": 8,
+      "receiver_id": 9,
+      "status": 0
+    }
+  ],
   "message": "获取好友申请列表成功"
 }
 ```
+
+**返回字段说明:**
+- `ID`: 申请记录ID
+- `sender_id`: 发起申请的用户ID
+- `receiver_id`: 接收申请的用户ID
+- `status`: 申请状态 (0: 待处理, 1: 已接受, 2: 已拒绝)
 
 ---
 
@@ -424,6 +518,181 @@ curl -X POST http://localhost:8081/api/friend/check \
   "message": "检查好友关系成功"
 }
 ```
+
+---
+
+### 13. 删除好友（需要认证）
+
+```bash
+curl -X POST http://localhost:8081/api/friend/delete \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "friend_id": 7
+  }'
+```
+
+**请求头:**
+- `Authorization`: Bearer Token
+
+**请求参数:**
+- `friend_id` (必填): 好友用户 ID
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": null,
+  "message": "删除好友成功"
+}
+```
+
+---
+
+### 14. 修改好友备注（需要认证）
+
+```bash
+curl -X POST http://localhost:8081/api/friend/remark_update \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "friend_id": 9,
+    "remark": "张三"
+  }'
+```
+
+**请求头:**
+- `Authorization`: Bearer Token
+
+**请求参数:**
+- `friend_id` (必填): 好友用户 ID
+- `remark` (可选): 新的备注名，传空字符串表示清除备注
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": null,
+  "message": "修改好友备注成功"
+}
+```
+
+---
+
+## WebSocket 聊天
+
+### 14. 建立聊天连接
+
+```javascript
+const ws = new WebSocket("ws://localhost:8081/ws/chat?token=你的token")
+```
+
+连接成功后，服务端会先返回：
+
+```json
+{
+  "type": "connected",
+  "user_id": 8
+}
+```
+
+### 15. 发送聊天消息
+
+客户端发送文本消息：
+
+```json
+{
+  "type": "chat",
+  "to_user_id": 9,
+  "message_type": "text",
+  "content": "你好"
+}
+```
+
+客户端发送图片消息：
+
+```json
+{
+  "type": "chat",
+  "to_user_id": 9,
+  "message_type": "image",
+  "content": "https://sleet.853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/test.jpg"
+}
+```
+
+发送成功后，发送方会收到：
+
+```json
+{
+  "type": "sent",
+  "message": {
+    "id": "1741170000000-1",
+    "from_user_id": 8,
+    "to_user_id": 9,
+    "message_type": "text",
+    "content": "你好",
+    "created_at": "2026-03-25T01:23:45Z"
+  }
+}
+```
+
+接收方会收到：
+
+```json
+{
+  "type": "chat",
+  "message": {
+    "id": "1741170000000-1",
+    "from_user_id": 8,
+    "to_user_id": 9,
+    "message_type": "text",
+    "content": "你好",
+    "created_at": "2026-03-25T01:23:45Z"
+  },
+  "offline": false
+}
+```
+
+### 16. 离线消息
+
+- 如果接收方不在线，服务端会把消息暂存在内存里
+- 接收方下次建立 WebSocket 连接后，服务端会立即投递这些消息
+- 服务端成功投递后，就会从内存中删除对应离线消息
+- 这些消息不会写入数据库，也不会做云端同步
+
+离线消息投递时格式如下：
+
+```json
+{
+  "type": "chat",
+  "message": {
+    "id": "1741170000000-1",
+    "from_user_id": 8,
+    "to_user_id": 9,
+    "content": "我离线给你发了一条消息",
+    "created_at": "2026-03-25T01:23:45Z"
+  },
+  "offline": true
+}
+```
+
+### 17. 错误消息
+
+```json
+{
+  "type": "error",
+  "error": "只能给好友发送消息"
+}
+```
+
+常见错误：
+
+- `缺少认证信息`
+- `无效的token`
+- `不支持的消息类型`
+- `接收方不能为空`
+- `消息内容不能为空`
+- `只能给好友发送消息`
 
 ---
 

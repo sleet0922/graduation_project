@@ -12,10 +12,16 @@ type ClaimsInterface interface {
 	GetAccount() string
 }
 
+const (
+	TokenTypeAccess  = "access"
+	TokenTypeRefresh = "refresh"
+)
+
 // Claims JWT声明结构体
 type Claims struct {
 	UserID               uint   `json:"user_id"` // 用户ID
 	Account              string `json:"account"` // 用户账号
+	TokenType            string `json:"token_type"`
 	jwt.RegisteredClaims        // JWT标准声明（过期时间、签发时间等）
 }
 
@@ -47,9 +53,18 @@ func NewJWTManager(secretKey string) *JWTManager {
 // 传入: expiresIn time.Duration      (token有效期)
 // 返回: string                       (生成的token字符串) / 返回: error (错误信息，成功则为nil)
 func (j *JWTManager) GenerateToken(userID uint, account string, expiresIn time.Duration) (string, error) {
+	return j.GenerateTokenWithType(userID, account, TokenTypeAccess, expiresIn)
+}
+
+func (j *JWTManager) GenerateRefreshToken(userID uint, account string, expiresIn time.Duration) (string, error) {
+	return j.GenerateTokenWithType(userID, account, TokenTypeRefresh, expiresIn)
+}
+
+func (j *JWTManager) GenerateTokenWithType(userID uint, account, tokenType string, expiresIn time.Duration) (string, error) {
 	claims := Claims{
-		UserID:  userID,
-		Account: account,
+		UserID:    userID,
+		Account:   account,
+		TokenType: tokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)), // 过期时间
 			IssuedAt:  jwt.NewNumericDate(time.Now()),                // 签发时间
@@ -92,4 +107,26 @@ func (j *JWTManager) RefreshToken(tokenString string, expiresIn time.Duration) (
 		return "", err
 	}
 	return j.GenerateToken(claims.UserID, claims.Account, expiresIn)
+}
+
+func (j *JWTManager) RefreshAccessToken(refreshToken string, expiresIn time.Duration) (string, error) {
+	claims, err := j.ParseToken(refreshToken)
+	if err != nil {
+		return "", err
+	}
+	if claims.TokenType != TokenTypeRefresh {
+		return "", errors.New("invalid refresh token")
+	}
+	return j.GenerateToken(claims.UserID, claims.Account, expiresIn)
+}
+
+func (j *JWTManager) RotateRefreshToken(refreshToken string, expiresIn time.Duration) (string, error) {
+	claims, err := j.ParseToken(refreshToken)
+	if err != nil {
+		return "", err
+	}
+	if claims.TokenType != TokenTypeRefresh {
+		return "", errors.New("invalid refresh token")
+	}
+	return j.GenerateRefreshToken(claims.UserID, claims.Account, expiresIn)
 }

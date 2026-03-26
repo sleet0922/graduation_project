@@ -180,6 +180,34 @@ func (h *FriendHandler) CheckFriendship(c *gin.Context) {
 	response.Success(c, gin.H{"is_friend": isFriend}, "检查好友关系成功")
 }
 
+func (h *FriendHandler) UpdateRemark(c *gin.Context) {
+	type UpdateRemarkRequest struct {
+		FriendID uint   `json:"friend_id" binding:"required"`
+		Remark   string `json:"remark"`
+	}
+
+	var req UpdateRemarkRequest
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+
+	err = h.friendService.UpdateRemark(userID, req.FriendID, req.Remark)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "修改好友备注失败")
+		return
+	}
+
+	response.Success(c, nil, "修改好友备注成功")
+}
+
 func (h *FriendHandler) getUserID(c *gin.Context) (uint, error) {
 	userID, exists := c.Get("user_id")
 	if !exists {
