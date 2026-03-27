@@ -10,10 +10,17 @@ import (
 	"sleet0922/graduation_project/pkg/response"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	chatHeartbeatInterval = 5 * time.Second
+	chatPingTimeout       = 3 * time.Second
+	chatWriteTimeout      = 5 * time.Second
 )
 
 type ChatHandler struct {
@@ -80,32 +87,54 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	writer := &chatSocketWriter{conn: conn}
 
-	// 3. 将连接注册到 ChatService 中，并提供一个向此 WebSocket 发送消息的回调函数
-	connectionID := h.chatService.RegisterConnection(claims.UserID, func(message *model.ChatMessage, offline bool) error {
-		return writer.Write(ctx, chatOutgoingMessage{
-			Type:    "chat",
-			Message: message,
-			Offline: offline,
-		})
-	})
-	log.Printf("websocket connected user_id=%d connection_id=%s", claims.UserID, connectionID)
-
-	// 4. 确保在函数退出（WebSocket 断开）时，注销该连接
-	defer func() {
-		h.chatService.UnregisterConnection(claims.UserID, connectionID)
-		log.Printf("websocket disconnected user_id=%d connection_id=%s", claims.UserID, connectionID)
+	// 启动心跳检测 goroutine，防止 TCP 半连接导致假在线
+	go func() {
+		ticker := time.NewTicker(chatHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pingCtx, pingCancel := context.WithTimeout(ctx, chatPingTimeout)
+				err := writer.Ping(pingCtx)
+				pingCancel()
+				if err != nil {
+					log.Printf("websocket ping failed user_id=%d: %v", claims.UserID, err)
+					conn.Close(websocket.StatusGoingAway, "ping failed")
+					return
+				}
+			}
+		}
 	}()
 
-	// 5. 向客户端发送连接成功的确认消息
+	// 3. 向客户端发送连接成功的确认消息（必须在注册前发送，否则离线消息会先到达，违反文档导致前端忽略）
 	if err := writer.Write(ctx, chatOutgoingMessage{
 		Type:   "connected",
 		UserID: claims.UserID,
 	}); err != nil {
 		return
 	}
+
+	// 4. 将连接注册到 ChatService 中，并提供一个向此 WebSocket 发送消息的回调函数
+	connectionID := h.chatService.RegisterConnection(claims.UserID, func(message *model.ChatMessage, offline bool) error {
+		return writer.WriteChat(ctx, chatOutgoingMessage{
+			Type:    "chat",
+			Message: message,
+			Offline: offline,
+		}, !offline)
+	})
+	log.Printf("websocket connected user_id=%d connection_id=%s", claims.UserID, connectionID)
+
+	// 5. 确保在函数退出（WebSocket 断开）时，注销该连接
+	defer func() {
+		h.chatService.UnregisterConnection(claims.UserID, connectionID)
+		log.Printf("websocket disconnected user_id=%d connection_id=%s", claims.UserID, connectionID)
+	}()
 
 	// 6. 开始阻塞式读取客户端发送的消息
 	for {
@@ -185,5 +214,34 @@ func (w *chatSocketWriter) Write(ctx context.Context, payload chatOutgoingMessag
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return wsjson.Write(ctx, w.conn, payload)
+	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
+	defer cancel()
+
+	return wsjson.Write(writeCtx, w.conn, payload)
+}
+
+func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMessage, verifyAlive bool) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if verifyAlive {
+		pingCtx, cancel := context.WithTimeout(ctx, chatPingTimeout)
+		err := w.conn.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+
+	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
+	defer cancel()
+
+	return wsjson.Write(writeCtx, w.conn, payload)
+}
+
+func (w *chatSocketWriter) Ping(ctx context.Context) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.conn.Ping(ctx)
 }
