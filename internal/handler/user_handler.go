@@ -275,3 +275,19 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		"location": user.Location,
 	}, "更新资料成功")
 }
+
+func (h *UserHandler) Delete(c *gin.Context) {
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+
+	err = h.userService.Delete(userID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "删除用户失败")
+		return
+	}
+
+	response.Success(c, nil, "删除用户成功")
+}

@@ -2,11 +2,12 @@ package db
 
 import (
 	"fmt"
-	"log"
 	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/internal/model"
+	"sleet0922/graduation_project/pkg/logger"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -23,12 +24,12 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("连接数据库失败: %v", err)
+		logger.Fatal("连接数据库失败", zap.Error(err))
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Fatalf("获取数据库实例失败: %v", err)
+		logger.Fatal("获取数据库实例失败", zap.Error(err))
 	}
 
 	sqlDB.SetMaxIdleConns(10)
@@ -37,9 +38,9 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 
 	err = db.AutoMigrate(&model.User{}, &model.Friend{}, &model.FriendRequest{})
 	if err != nil {
-		log.Fatalf("数据库迁移失败: %v", err)
+		logger.Fatal("数据库迁移失败", zap.Error(err))
 	}
 
-	log.Println("数据库连接成功")
+	logger.Info("数据库连接成功")
 	return db
 }

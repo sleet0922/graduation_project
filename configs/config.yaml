@@ -19,3 +19,11 @@ oss:
 
 jwt:
   secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"
+
+log:
+  level: "info"
+  filename: "logs/app.log"
+  max_size: 100
+  max_backups: 3
+  max_age: 28
+  compress: true

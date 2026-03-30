@@ -15,6 +15,7 @@ import (
 type UserService interface {
 	Register(email, password string) (*model.User, error)
 	Login(account, password string) (*model.User, error)
+	Delete(userID uint) error
 	SearchUser(keyword string) (*model.User, error)
 	GetByID(id uint) (*model.User, error)
 	UpdateAvatar(userID uint, avatar string) (*model.User, error)
@@ -129,4 +130,8 @@ func (s *userService) UpdateProfile(userID uint, gender int, birthday string, lo
 
 func (s *userService) GetSelf(userID uint) (*model.User, error) {
 	return s.userRepo.GetSelf(userID)
+}
+
+func (s *userService) Delete(userID uint) error {
+	return s.userRepo.Delete(userID)
 }

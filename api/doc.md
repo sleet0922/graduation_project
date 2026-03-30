@@ -345,6 +345,27 @@ curl -X GET "http://localhost:8081/api/oss/download-url?key=test.jpg"
 
 ---
 
+### 8. 删除用户/注销账号（需要认证）
+
+```bash
+curl -X POST http://localhost:8081/api/user/delete \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**请求头:**
+- `Authorization`: Bearer Token
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": null,
+  "message": "删除用户成功"
+}
+```
+
+---
+
 ## 好友相关 API
 
 ### 9. 发送好友请求（需要认证）

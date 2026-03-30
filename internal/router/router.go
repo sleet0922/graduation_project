@@ -13,11 +13,11 @@ import (
 )
 
 func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
 
 	// 添加中间件
-	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
+	r.Use(middleware.GinLogger())
+	r.Use(middleware.GinRecovery())
 	r.Use(middleware.CorsMiddleware())
 
 	// 初始化JWT
@@ -35,13 +35,12 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	chatService := service.NewChatService(friendRepo)
 	chatHandler := handler.NewChatHandler(chatService, jwtManager)
 
-	// api 路由
 	r.POST("/api/user/register", userHandler.Register)
 	r.POST("/api/user/login", userHandler.Login)
 	r.POST("/api/user/refresh", userHandler.RefreshToken)
 	r.GET("/api/oss/upload-url", ossHandler.GetUploadURL)
 	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
-	r.GET("/ws/chat", chatHandler.Connect)
+	r.GET("/ws/chat", jwtMiddleware.Auth(), chatHandler.Connect)
 	r.POST("/api/user/avatar", jwtMiddleware.Auth(), userHandler.UpdateAvatar)
 	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
 	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
@@ -55,5 +54,6 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.GET("/api/friend/list", jwtMiddleware.Auth(), friendHandler.GetByUserID)
 	r.POST("/api/friend/check", jwtMiddleware.Auth(), friendHandler.CheckFriendship)
 	r.POST("/api/friend/remark_update", jwtMiddleware.Auth(), friendHandler.UpdateRemark)
+	r.POST("/api/user/delete", jwtMiddleware.Auth(), userHandler.Delete)
 	return r
 }

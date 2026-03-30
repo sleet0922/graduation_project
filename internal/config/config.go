@@ -32,11 +32,17 @@ type JWTConfig struct {
 	SecretKey string `json:"secret_key" mapstructure:"secret_key"`
 }
 
+type LogConfig struct {
+	Level    string `json:"level" mapstructure:"level"`
+	Filename string `json:"filename" mapstructure:"filename"`
+}
+
 type ViperConfig struct {
 	Server   GinPortConfig  `json:"server"`
 	Database DatabaseConfig `json:"database"`
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
+	Log      LogConfig      `json:"log" mapstructure:"log"`
 }
 
 func InitConfig() *ViperConfig {
