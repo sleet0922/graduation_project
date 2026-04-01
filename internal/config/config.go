@@ -43,6 +43,13 @@ type ViperConfig struct {
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
 	Log      LogConfig      `json:"log" mapstructure:"log"`
+	Redis    RedisConfig    `json:"redis" mapstructure:"redis"`
+}
+type RedisConfig struct {
+	Addr     string `json:"addr"`
+	Port     int    `json:"port"`
+	Password string `json:"password"`
+	DB       int    `json:"db"`
 }
 
 func InitConfig() *ViperConfig {

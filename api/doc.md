@@ -600,6 +600,76 @@ curl -X POST http://localhost:8081/api/friend/remark_update \
 
 ---
 
+## 聊天相关 API
+
+### 15. 获取云端聊天记录（需要认证）
+
+```bash
+# 获取所有好友的聊天记录
+curl -X GET "http://localhost:8081/api/chat/history" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 获取指定好友的聊天记录
+curl -X GET "http://localhost:8081/api/chat/history?friend_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**请求头:**
+- `Authorization`: Bearer Token
+
+**请求参数:**
+- `friend_id` (可选): 指定好友的用户 ID。如果不传则返回当前用户与所有好友的聊天记录。
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": [
+    {
+      "id": "1738221800123456789-1",
+      "from_user_id": 8,
+      "to_user_id": 9,
+      "message_type": "text",
+      "content": "你好",
+      "created_at": "2026-03-31T13:10:20Z",
+      "updated_at": "2026-03-31T13:10:20Z"
+    }
+  ],
+  "message": "获取成功"
+}
+```
+
+---
+
+### 16. 删除云端聊天记录（需要认证）
+
+```bash
+# 删除所有好友的聊天记录（仅删除自己视角，不影响对方）
+curl -X DELETE "http://localhost:8081/api/chat/history" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 删除与指定好友的聊天记录（仅删除自己视角，不影响对方）
+curl -X DELETE "http://localhost:8081/api/chat/history?friend_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**请求头:**
+- `Authorization`: Bearer Token
+
+**请求参数:**
+- `friend_id` (可选): 指定好友的用户 ID。如果不传则删除当前用户与所有好友的聊天记录。
+
+**响应示例:**
+```json
+{
+  "code": 200,
+  "data": null,
+  "message": "删除成功"
+}
+```
+
+---
+
 ## WebSocket 聊天
 
 ### 14. 建立聊天连接

@@ -12,13 +12,15 @@ import (
 
 func main() {
 	cfg := config.InitConfig()
-	
+
 	// 初始化日志
 	logger.InitLogger(cfg)
 	defer logger.Log.Sync()
-	
+
 	gin.SetMode(cfg.Server.Mode)
 	database := db.InitDB(cfg)
+	db.InitRedis(cfg)
+
 	r := router.InitRouter(database, cfg)
 
 	logger.Info("服务器启动", zap.String("port", cfg.Server.Port))

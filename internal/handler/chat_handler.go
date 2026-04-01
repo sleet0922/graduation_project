@@ -8,6 +8,7 @@ import (
 	"sleet0922/graduation_project/pkg/jwt"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
+	"strconv"
 	"sync"
 	"time"
 
@@ -161,17 +162,14 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 func (w *chatSocketWriter) Write(ctx context.Context, payload chatOutgoingMessage) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
 	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
 	defer cancel()
-
 	return wsjson.Write(writeCtx, w.conn, payload)
 }
 
 func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMessage, verifyAlive bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
 	if verifyAlive {
 		pingCtx, cancel := context.WithTimeout(ctx, chatPingTimeout)
 		err := w.conn.Ping(pingCtx)
@@ -183,13 +181,72 @@ func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMe
 
 	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
 	defer cancel()
-
 	return wsjson.Write(writeCtx, w.conn, payload)
 }
 
 func (w *chatSocketWriter) Ping(ctx context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
 	return w.conn.Ping(ctx)
+}
+
+func (h *ChatHandler) GetHistory(c *gin.Context) {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+		return
+	}
+	userID := userIDVal.(uint)
+
+	friendIDStr := c.Query("friend_id")
+	if friendIDStr != "" {
+		friendID, err := strconv.ParseUint(friendIDStr, 10, 32)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "无效的friend_id")
+			return
+		}
+		messages, err := h.chatService.GetHistory(userID, uint(friendID))
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, "获取记录失败")
+			return
+		}
+		response.Success(c, messages, "获取成功")
+		return
+	}
+
+	messages, err := h.chatService.GetAllHistory(userID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "获取记录失败")
+		return
+	}
+	response.Success(c, messages, "获取成功")
+}
+
+func (h *ChatHandler) DeleteHistory(c *gin.Context) {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+		return
+	}
+	userID := userIDVal.(uint)
+	friendIDStr := c.Query("friend_id")
+	if friendIDStr != "" {
+		friendID, err := strconv.ParseUint(friendIDStr, 10, 32)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "无效的friend_id")
+			return
+		}
+		err = h.chatService.DeleteHistory(userID, uint(friendID))
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, "删除失败")
+			return
+		}
+	} else {
+		err := h.chatService.DeleteAllHistory(userID)
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, "删除失败")
+			return
+		}
+	}
+	response.Success(c, nil, "删除成功")
 }

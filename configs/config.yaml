@@ -27,3 +27,9 @@ log:
   max_backups: 3
   max_age: 28
   compress: true
+
+redis:
+  addr: "192.168.3.114"
+  port: 6379
+  password: ""
+  db: 0
