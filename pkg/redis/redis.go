@@ -1,19 +1,20 @@
-package db
+package redis
 
 import (
 	"context"
-	"sleet0922/graduation_project/internal/config"
-	"sleet0922/graduation_project/pkg/logger"
 	"strconv"
 
-	"github.com/redis/go-redis/v9"
+	"sleet0922/graduation_project/internal/config"
+	"sleet0922/graduation_project/pkg/logger"
+
+	goredis "github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
-var RedisClient *redis.Client
+var RedisClient *goredis.Client
 
 func InitRedis(cfg *config.ViperConfig) {
-	RedisClient = redis.NewClient(&redis.Options{
+	RedisClient = goredis.NewClient(&goredis.Options{
 		Addr:     cfg.Redis.Addr + ":" + strconv.Itoa(cfg.Redis.Port),
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.DB,

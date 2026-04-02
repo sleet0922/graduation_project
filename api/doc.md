@@ -1,11 +1,47 @@
 # API 测试文档
 
+## 注意事项
+
+### 服务器启动配置
+
+服务器默认使用 HTTPS 协议运行在 `code.gelsomino.cn:8081`。如果需要修改配置，请编辑 `configs/config.yaml` 文件：
+
+```yaml
+server:
+  port: ":8081"        # 服务器端口
+  mode: "release"      # 运行模式: "release" 使用 HTTPS, "debug" 使用 HTTP
+  cert_file: "/ssl/1.pem"  # SSL 证书文件路径
+  key_file: "/ssl/1.key"   # SSL 私钥文件路径
+```
+
+**开发调试时使用 HTTP：**
+将 `mode` 改为 `"debug"`，服务器将使用 HTTP 协议：
+
+```yaml
+server:
+  mode: "debug"  # 使用 HTTP 协议
+```
+
+### TLS 配置说明
+
+- **生产环境** (`mode: "release"`): 使用 HTTPS，需要正确配置 `cert_file` 和 `key_file` 路径
+- **开发环境** (`mode: "debug"`): 使用 HTTP，无需证书文件
+
+### 常见问题
+
+如果遇到 "open : no such file or directory" 错误，请检查：
+1. `cert_file` 和 `key_file` 配置的路径是否存在
+2. 证书文件是否有读取权限
+3. 或者将 `mode` 改为 `"debug"` 使用 HTTP 协议
+
 ## 用户相关 API
 
 ### 1. 用户注册
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/user/register \
+curl -X POST https://code.gelsomino.cn:8081/api/user/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "sleet0528@outlook.com",
@@ -35,8 +71,10 @@ curl -X POST http://localhost:8081/api/user/register \
 
 ### 2. 用户登录
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/user/login \
+curl -X POST https://code.gelsomino.cn:8081/api/user/login \
   -H "Content-Type: application/json" \
   -d '{
     "account": "sleet0528@outlook.com",
@@ -85,12 +123,16 @@ export TOKEN="你的token"
 export REFRESH_TOKEN="你的refresh_token"
 ```
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ---
 
 ### 3. 刷新 token
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/user/refresh \
+curl -X POST https://code.gelsomino.cn:8081/api/user/refresh \
   -H "Content-Type: application/json" \
   -d '{
     "refresh_token": "'"$REFRESH_TOKEN"'"
@@ -124,8 +166,10 @@ curl -X POST http://localhost:8081/api/user/refresh \
 
 ### 4. 获取用户信息（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/user/self \
+curl -X POST https://code.gelsomino.cn:8081/api/user/self \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN"
 ```
@@ -154,10 +198,12 @@ curl -X POST http://localhost:8081/api/user/self \
 
 ---
 
-### 4. 搜索用户（可选认证）
+### 5. 搜索用户（可选认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X GET "http://localhost:8081/api/user/search?keyword=sleet0528@outlook"
+curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=sleet0528@outlook"
 ```
 
 **请求参数:**
@@ -199,10 +245,12 @@ curl -X GET "http://localhost:8081/api/user/search?keyword=sleet0528@outlook"
 
 ---
 
-### 5. 更新用户名（需要认证）
+### 6. 更新用户名（需要认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X POST http://localhost:8081/api/user/name_update \
+curl -X POST https://code.gelsomino.cn:8081/api/user/name_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -230,10 +278,12 @@ curl -X POST http://localhost:8081/api/user/name_update \
 
 ---
 
-### 5. 更新密码（需要认证）
+### 7. 更新密码（需要认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X POST http://localhost:8081/api/user/password_update \
+curl -X POST https://code.gelsomino.cn:8081/api/user/password_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -260,10 +310,12 @@ curl -X POST http://localhost:8081/api/user/password_update \
 
 ---
 
-### 6. 更新用户资料（需要认证）
+### 8. 更新用户资料（需要认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X POST http://localhost:8081/api/user/profile_update \
+curl -X POST https://code.gelsomino.cn:8081/api/user/profile_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -299,10 +351,12 @@ curl -X POST http://localhost:8081/api/user/profile_update \
 
 ## OSS 相关 API
 
-### 6. 获取上传 URL
+### 9. 获取上传 URL
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X GET "http://localhost:8081/api/oss/upload-url?key=test.jpg"
+curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=test.jpg"
 ```
 
 **请求参数:**
@@ -322,10 +376,12 @@ curl -X GET "http://localhost:8081/api/oss/upload-url?key=test.jpg"
 
 ---
 
-### 7. 获取下载 URL
+### 10. 获取下载 URL
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X GET "http://localhost:8081/api/oss/download-url?key=test.jpg"
+curl -X GET "https://code.gelsomino.cn:8081/api/oss/download-url?key=test.jpg"
 ```
 
 **请求参数:**
@@ -345,10 +401,12 @@ curl -X GET "http://localhost:8081/api/oss/download-url?key=test.jpg"
 
 ---
 
-### 8. 删除用户/注销账号（需要认证）
+### 11. 删除用户/注销账号（需要认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X POST http://localhost:8081/api/user/delete \
+curl -X POST https://code.gelsomino.cn:8081/api/user/delete \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -368,10 +426,12 @@ curl -X POST http://localhost:8081/api/user/delete \
 
 ## 好友相关 API
 
-### 9. 发送好友请求（需要认证）
+### 12. 发送好友请求（需要认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X POST http://localhost:8081/api/friend/request \
+curl -X POST https://code.gelsomino.cn:8081/api/friend/request \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -427,10 +487,12 @@ curl -X POST http://localhost:8081/api/friend/request \
 
 ---
 
-### 10. 获取好友请求列表（需要认证）
+### 13. 获取好友请求列表（需要认证）
+
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
 
 ```bash
-curl -X GET http://localhost:8081/api/friend/requests \
+curl -X GET https://code.gelsomino.cn:8081/api/friend/requests \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -466,8 +528,10 @@ curl -X GET http://localhost:8081/api/friend/requests \
 
 ### 11. 获取好友列表（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X GET http://localhost:8081/api/friend/list \
+curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -514,8 +578,10 @@ curl -X GET http://localhost:8081/api/friend/list \
 
 ### 12. 检查好友关系（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/friend/check \
+curl -X POST https://code.gelsomino.cn:8081/api/friend/check \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -544,8 +610,10 @@ curl -X POST http://localhost:8081/api/friend/check \
 
 ### 13. 删除好友（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/friend/delete \
+curl -X POST https://code.gelsomino.cn:8081/api/friend/delete \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -572,8 +640,10 @@ curl -X POST http://localhost:8081/api/friend/delete \
 
 ### 14. 修改好友备注（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
-curl -X POST http://localhost:8081/api/friend/remark_update \
+curl -X POST https://code.gelsomino.cn:8081/api/friend/remark_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -604,13 +674,15 @@ curl -X POST http://localhost:8081/api/friend/remark_update \
 
 ### 15. 获取云端聊天记录（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
 # 获取所有好友的聊天记录
-curl -X GET "http://localhost:8081/api/chat/history" \
+curl -X GET "https://code.gelsomino.cn:8081/api/chat/history" \
   -H "Authorization: Bearer $TOKEN"
 
 # 获取指定好友的聊天记录
-curl -X GET "http://localhost:8081/api/chat/history?friend_id=1" \
+curl -X GET "https://code.gelsomino.cn:8081/api/chat/history?friend_id=1" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -643,13 +715,15 @@ curl -X GET "http://localhost:8081/api/chat/history?friend_id=1" \
 
 ### 16. 删除云端聊天记录（需要认证）
 
+**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+
 ```bash
 # 删除所有好友的聊天记录（仅删除自己视角，不影响对方）
-curl -X DELETE "http://localhost:8081/api/chat/history" \
+curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history" \
   -H "Authorization: Bearer $TOKEN"
 
 # 删除与指定好友的聊天记录（仅删除自己视角，不影响对方）
-curl -X DELETE "http://localhost:8081/api/chat/history?friend_id=1" \
+curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history?friend_id=1" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -672,10 +746,12 @@ curl -X DELETE "http://localhost:8081/api/chat/history?friend_id=1" \
 
 ## WebSocket 聊天
 
-### 14. 建立聊天连接
+### 17. 建立聊天连接
+
+**注意**: WebSocket 连接使用 `ws://` 或 `wss://` 协议
 
 ```javascript
-const ws = new WebSocket("ws://localhost:8081/ws/chat?token=你的token")
+const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token")
 ```
 
 连接成功后，服务端会先返回：
@@ -793,12 +869,12 @@ const ws = new WebSocket("ws://localhost:8081/ws/chat?token=你的token")
 
 1. **注册用户**
 ```bash
-curl -X POST http://localhost:8081/api/user/register -H "Content-Type: application/json" -d '{"email": "sleet0528@outlook.com", "password": "Zyz20050922!"}'
+curl -X POST https://code.gelsomino.cn:8081/api/user/register -H "Content-Type: application/json" -d '{"email": "sleet0528@outlook.com", "password": "Zyz20050922!"}'
 ```
 
 2. **登录获取 token**
 ```bash
-curl -X POST http://localhost:8081/api/user/login -H "Content-Type: application/json" -d '{"account": "sleet0528@outlook.com", "password": "Zyz20050922!"}'
+curl -X POST https://code.gelsomino.cn:8081/api/user/login -H "Content-Type: application/json" -d '{"account": "sleet0528@outlook.com", "password": "Zyz20050922!"}'
 ```
 
 3. **设置 token 变量**
@@ -809,36 +885,36 @@ export TOKEN="你的token"
 4. **测试其他 API**
 ```bash
 # 获取用户信息
-curl -X POST http://localhost:8081/api/user/self -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN"
+curl -X POST https://code.gelsomino.cn:8081/api/user/self -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN"
 
 # 搜索用户（通过邮箱或账号，不需要认证）
-curl -X GET "http://localhost:8081/api/user/search?keyword=sleet0528@outlook"
+curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=sleet0528@outlook"
 
 # 测试 OSS API
-curl -X GET "http://localhost:8081/api/oss/upload-url?key=test.jpg"
+curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=test.jpg"
 
 # 测试好友 API（通过邮箱或账号）
-curl -X POST http://localhost:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account": "sleet0528@outlook"}'
+curl -X POST https://code.gelsomino.cn:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account": "sleet0528@outlook"}'
 
 # 获取好友列表（返回好友详细信息）
-curl -X GET http://localhost:8081/api/friend/list -H "Authorization: Bearer $TOKEN"
+curl -X GET https://code.gelsomino.cn:8081/api/friend/list -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 完整的好友添加流程：
 
 1. **搜索用户**（不需要认证）
 ```bash
-curl -X GET "http://localhost:8081/api/user/search?keyword=目标用户邮箱"
+curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=目标用户邮箱"
 ```
 返回目标用户的详细信息（名字、邮箱、账号、头像、生日等）
 
 2. **发送好友请求**（需要认证）
 ```bash
-curl -X POST http://localhost:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account":"目标用户邮箱"}'
+curl -X POST https://code.gelsomino.cn:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account":"目标用户邮箱"}'
 ```
 
 ### 注意事项：
-- 确保服务运行在 `localhost:8081`
+- 确保服务运行在 `code.gelsomino.cn:8081`
 - 注册时账号由系统自动生成 10 位随机数字
 - 邮箱用于登录，账号用于搜索好友
 - 搜索用户接口不需要认证，可以公开调用

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sleet0922/graduation_project/internal/db"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
+	"sleet0922/graduation_project/pkg/redis"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,11 +143,11 @@ func (s *chatService) SendMessage(fromUserID, toUserID uint, messageType string,
 		s.chatRepo.Save(message)
 	}
 
-	if db.RedisClient != nil {
+	if redis.RedisClient != nil {
 		msgBytes, _ := json.Marshal(message)
 		pushKey := fmt.Sprintf("chat:push:%d", toUserID)
-		db.RedisClient.RPush(context.Background(), pushKey, msgBytes)
-		db.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
+		redis.RedisClient.RPush(context.Background(), pushKey, msgBytes)
+		redis.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
 	}
 	if len(connections) == 0 {
 		s.enqueueOfflineMessage(toUserID, message)
