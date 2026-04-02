@@ -182,7 +182,7 @@ func (h *UserHandler) RefreshToken(c *gin.Context) {
 
 func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 	type UpdateAvatarRequest struct {
-		ObjectKey string `json:"object_key" binding:"required"`
+		Avatar string `json:"avatar" binding:"required"`
 	}
 	var req UpdateAvatarRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -194,7 +194,7 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
 		return
 	}
-	user, err := h.userService.UpdateAvatar(userID, req.ObjectKey)
+	user, err := h.userService.UpdateAvatar(userID, req.Avatar)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "更新头像失败")
 		return
