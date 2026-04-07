@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 func GinLogger() gin.HandlerFunc {
@@ -24,12 +24,12 @@ func GinLogger() gin.HandlerFunc {
 		c.Next()
 		cost := time.Since(start)
 		logger.Info(path,
-			zap.Int("status", c.Writer.Status()),
-			zap.String("method", c.Request.Method),
-			zap.String("ip", c.ClientIP()),
-			zap.Duration("cost", cost),
-			zap.String("query", query),
-			zap.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
+			slog.Int("status", c.Writer.Status()),
+			slog.String("method", c.Request.Method),
+			slog.String("ip", c.ClientIP()),
+			slog.Duration("cost", cost),
+			slog.String("query", query),
+			slog.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
 		)
 	}
 }
@@ -51,7 +51,7 @@ func GinRecovery() gin.HandlerFunc {
 			if err != nil {
 				req, _ := httputil.DumpRequest(c.Request, false)
 				if isError(err) {
-					logger.Error(c.Request.URL.Path, zap.Any("error", err), zap.String("request", string(req)))
+					logger.Error(c.Request.URL.Path, slog.Any("error", err), slog.String("request", string(req)))
 					if e, ok := err.(error); ok {
 						c.Error(e)
 					}
@@ -59,9 +59,9 @@ func GinRecovery() gin.HandlerFunc {
 					return
 				}
 				logger.Error("[Recovery from panic]",
-					zap.Any("error", err),
-					zap.String("request", string(req)),
-					zap.String("stack", string(debug.Stack())),
+					slog.Any("error", err),
+					slog.String("request", string(req)),
+					slog.String("stack", string(debug.Stack())),
 				)
 				response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 				c.Abort()

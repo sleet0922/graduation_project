@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
@@ -15,7 +16,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 const (
@@ -32,6 +32,7 @@ type ChatHandler struct {
 type chatIncomingMessage struct {
 	Type        string `json:"type"`
 	ToUserID    uint   `json:"to_user_id"`
+	GroupID     uint   `json:"group_id"`
 	MessageType string `json:"message_type"`
 	Content     string `json:"content"`
 }
@@ -39,6 +40,7 @@ type chatIncomingMessage struct {
 type chatOutgoingMessage struct {
 	Type    string             `json:"type"`
 	UserID  uint               `json:"user_id,omitempty"`
+	GroupID uint               `json:"group_id,omitempty"`
 	Message *model.ChatMessage `json:"message,omitempty"`
 	Offline bool               `json:"offline,omitempty"`
 	Error   string             `json:"error,omitempty"`
@@ -86,7 +88,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 				err := writer.Ping(pingCtx)
 				pingCancel()
 				if err != nil {
-					logger.Warn("websocket ping failed", zap.Uint("user_id", userID), zap.Error(err))
+					logger.Warn("websocket ping failed", slog.Any("user_id", userID), slog.Any("error", err))
 					conn.Close(websocket.StatusGoingAway, "ping failed")
 					return
 				}
@@ -107,17 +109,23 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			Message: message,
 			Offline: offline,
 		}, !offline)
+	}, func(eventType string, groupID uint) error {
+		return writer.WriteChat(ctx, chatOutgoingMessage{
+			Type:    eventType,
+			GroupID: groupID,
+		}, false)
 	})
-	logger.Info("websocket connected", zap.Uint("user_id", userID), zap.String("connection_id", connectionID))
+	logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
 
 	defer func() {
 		h.chatService.UnregisterConnection(userID, connectionID)
-		logger.Info("websocket disconnected", zap.Uint("user_id", userID), zap.String("connection_id", connectionID))
+		logger.Info("websocket disconnected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
 	}()
 
 	for {
 		var incoming chatIncomingMessage
 		if err := wsjson.Read(ctx, conn, &incoming); err != nil {
+			return
 		}
 
 		if incoming.Type != "chat" {
@@ -130,17 +138,17 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			continue
 		}
 
-		if incoming.ToUserID == 0 {
+		if incoming.ToUserID == 0 && incoming.GroupID == 0 {
 			if err := writer.Write(ctx, chatOutgoingMessage{
 				Type:  "error",
-				Error: "接收方不能为空",
+				Error: "接收方或群聊不能为空",
 			}); err != nil {
 				return
 			}
 			continue
 		}
 
-		message, err := h.chatService.SendMessage(userID, incoming.ToUserID, incoming.MessageType, incoming.Content)
+		message, err := h.chatService.SendMessage(userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
 		if err != nil {
 			if err := writer.Write(ctx, chatOutgoingMessage{
 				Type:  "error",
@@ -198,6 +206,22 @@ func (h *ChatHandler) GetHistory(c *gin.Context) {
 	}
 	userID := userIDVal.(uint)
 
+	groupIDStr := c.Query("group_id")
+	if groupIDStr != "" {
+		groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "无效的group_id")
+			return
+		}
+		messages, err := h.chatService.GetHistory(userID, 0, uint(groupID))
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Success(c, messages, "获取成功")
+		return
+	}
+
 	friendIDStr := c.Query("friend_id")
 	if friendIDStr != "" {
 		friendID, err := strconv.ParseUint(friendIDStr, 10, 32)
@@ -205,7 +229,7 @@ func (h *ChatHandler) GetHistory(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, "无效的friend_id")
 			return
 		}
-		messages, err := h.chatService.GetHistory(userID, uint(friendID))
+		messages, err := h.chatService.GetHistory(userID, uint(friendID), 0)
 		if err != nil {
 			response.Error(c, http.StatusInternalServerError, "获取记录失败")
 			return
@@ -229,6 +253,23 @@ func (h *ChatHandler) DeleteHistory(c *gin.Context) {
 		return
 	}
 	userID := userIDVal.(uint)
+
+	groupIDStr := c.Query("group_id")
+	if groupIDStr != "" {
+		groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "无效的group_id")
+			return
+		}
+		err = h.chatService.DeleteHistory(userID, 0, uint(groupID))
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Success(c, nil, "删除成功")
+		return
+	}
+
 	friendIDStr := c.Query("friend_id")
 	if friendIDStr != "" {
 		friendID, err := strconv.ParseUint(friendIDStr, 10, 32)
@@ -236,7 +277,7 @@ func (h *ChatHandler) DeleteHistory(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, "无效的friend_id")
 			return
 		}
-		err = h.chatService.DeleteHistory(userID, uint(friendID))
+		err = h.chatService.DeleteHistory(userID, uint(friendID), 0)
 		if err != nil {
 			response.Error(c, http.StatusInternalServerError, "删除失败")
 			return

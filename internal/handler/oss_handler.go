@@ -6,6 +6,7 @@ import (
 	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/pkg/oss"
 	"sleet0922/graduation_project/pkg/response"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -83,4 +84,45 @@ func (h *OssHandler) GetDownloadURL(c *gin.Context) {
 		"download_url": url,
 		"expires_in":   "1小时",
 	}, "获取下载URL成功")
+}
+
+func (h *OssHandler) UploadChatImage(c *gin.Context) {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "请选择图片文件")
+		return
+	}
+	if file.Size == 0 {
+		response.Error(c, http.StatusBadRequest, "图片不能为空")
+		return
+	}
+	if file.Size > 10*1024*1024 {
+		response.Error(c, http.StatusBadRequest, "图片大小不能超过10MB")
+		return
+	}
+	contentType := file.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		response.Error(c, http.StatusBadRequest, "仅支持图片上传")
+		return
+	}
+
+	userID := userIDVal.(uint)
+	fileURL, err := h.r2Client.UploadFile(c.Request.Context(), file, fmt.Sprintf("chat/%d", userID))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "上传聊天图片失败")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"url":         fileURL,
+		"content":     fileURL,
+		"filename":    file.Filename,
+		"contentType": contentType,
+	}, "上传聊天图片成功")
 }

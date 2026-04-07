@@ -1,17 +1,15 @@
 package logger
 
 import (
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sleet0922/graduation_project/internal/config"
-	"time"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // 全局实例
-var Log *zap.Logger
+var Log *slog.Logger
 
 // 从viper读取配置,初始化
 func InitLogger(cfg *config.ViperConfig) {
@@ -20,34 +18,20 @@ func InitLogger(cfg *config.ViperConfig) {
 	// 判断是否开发环境
 	isDev := cfg.Server.Mode != "release"
 	// 默认日志级别
-	logLevel := zapcore.InfoLevel
+	var logLevel slog.Level
 
 	// 日志级别
 	switch logConfig.Level {
 	case "debug":
-		logLevel = zapcore.DebugLevel
+		logLevel = slog.LevelDebug
 	case "info":
-		logLevel = zapcore.InfoLevel
+		logLevel = slog.LevelInfo
 	case "warn":
-		logLevel = zapcore.WarnLevel
+		logLevel = slog.LevelWarn
 	case "error":
-		logLevel = zapcore.ErrorLevel
-	}
-
-	// 配置日志样式
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-		enc.AppendString(t.Format("2006-01-02 15:04:05"))
-	}
-
-	// 选择日志样式
-	var encoder zapcore.Encoder
-	if isDev {
-		encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-		encoder = zapcore.NewConsoleEncoder(encoderConfig)
-	} else {
-		encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-		encoder = zapcore.NewJSONEncoder(encoderConfig)
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
 	}
 
 	// 创建日志文件夹+文件
@@ -59,37 +43,52 @@ func InitLogger(cfg *config.ViperConfig) {
 		panic("打开日志文件失败: " + err.Error())
 	}
 
-	// 输出到控制台+文件
-	writeSyncer := zapcore.NewMultiWriteSyncer(
-		zapcore.AddSync(os.Stdout),
-		zapcore.AddSync(logFile),
-	)
-
-	// 8. 创建zap核心对象
-	core := zapcore.NewCore(encoder, writeSyncer, logLevel)
-	if isDev {
-		Log = zap.New(core)
-	} else {
-		Log = zap.New(core, zap.AddCaller())
+	cwd, _ := os.Getwd()
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.SourceKey {
+				source, ok := a.Value.Any().(*slog.Source)
+				if ok && source != nil {
+					if rel, err := filepath.Rel(cwd, source.File); err == nil {
+						source.File = rel
+					}
+				}
+			}
+			return a
+		},
 	}
 
-	// 替换zap全局logger
-	zap.ReplaceGlobals(Log)
+	var handler slog.Handler
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	if isDev {
+		// 开发环境：文本格式
+		opts.AddSource = false
+		handler = slog.NewTextHandler(multiWriter, opts)
+	} else {
+		// 生产环境：JSON格式
+		opts.AddSource = true
+		handler = slog.NewJSONHandler(multiWriter, opts)
+	}
+
+	Log = slog.New(handler)
+	slog.SetDefault(Log)
 }
 
 // 日志级别函数
-func Info(msg string, fields ...zap.Field) {
-	Log.Info(msg, fields...)
+func Info(msg string, args ...any) {
+	slog.Info(msg, args...)
 }
-func Error(msg string, fields ...zap.Field) {
-	Log.Error(msg, fields...)
+func Error(msg string, args ...any) {
+	slog.Error(msg, args...)
 }
-func Debug(msg string, fields ...zap.Field) {
-	Log.Debug(msg, fields...)
+func Debug(msg string, args ...any) {
+	slog.Debug(msg, args...)
 }
-func Warn(msg string, fields ...zap.Field) {
-	Log.Warn(msg, fields...)
+func Warn(msg string, args ...any) {
+	slog.Warn(msg, args...)
 }
-func Fatal(msg string, fields ...zap.Field) {
-	Log.Fatal(msg, fields...)
+func Fatal(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
 }
