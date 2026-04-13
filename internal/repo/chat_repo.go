@@ -49,8 +49,12 @@ func (r *chatRepository) GetGroupHistory(userID, groupID uint) ([]*model.ChatMes
 
 func (r *chatRepository) GetAllHistory(userID uint) ([]*model.ChatMessage, error) {
 	var messages []*model.ChatMessage
+	groupMembershipSubQuery := r.db.Model(&model.ChatGroupMember{}).
+		Select("group_id").
+		Where("user_id = ?", userID)
 	err := r.db.Where("((conversation_type = ? OR conversation_type = '') AND ((from_user_id = ? AND sender_deleted = ?) OR (to_user_id = ? AND receiver_deleted = ?))) OR (conversation_type = ? AND (deleted_by IS NULL OR deleted_by NOT LIKE ?))",
 		"single", userID, false, userID, false, "group", deletedMarker(userID)).
+		Where("conversation_type <> ? OR group_id IN (?)", "group", groupMembershipSubQuery).
 		Order("created_at asc").
 		Find(&messages).Error
 	return messages, err
@@ -87,8 +91,11 @@ func (r *chatRepository) DeleteAllHistory(userID uint) error {
 	if err != nil {
 		return err
 	}
+	groupMembershipSubQuery := r.db.Model(&model.ChatGroupMember{}).
+		Select("group_id").
+		Where("user_id = ?", userID)
 	return r.db.Model(&model.ChatMessage{}).
-		Where("conversation_type = ? AND (deleted_by IS NULL OR deleted_by NOT LIKE ?)", "group", deletedMarker(userID)).
+		Where("conversation_type = ? AND group_id IN (?) AND (deleted_by IS NULL OR deleted_by NOT LIKE ?)", "group", groupMembershipSubQuery, deletedMarker(userID)).
 		Update("deleted_by", gorm.Expr("CONCAT(COALESCE(deleted_by, ''), ?)", deletedMarker(userID))).Error
 }
 

@@ -9,6 +9,7 @@ import (
 	"sleet0922/graduation_project/pkg/response"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type FriendHandler struct {
@@ -148,8 +149,26 @@ func (h *FriendHandler) HandleFriendRequest(c *gin.Context) {
 		return
 	}
 
-	err = h.friendService.HandleFriendRequest(req.RequestID, req.Status)
+	userID, err := h.getUserID(c)
+	if err != nil || userID == 0 {
+		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		return
+	}
+
+	err = h.friendService.HandleFriendRequest(userID, req.RequestID, req.Status)
 	if err != nil {
+		if errors.Is(err, service.ErrFriendRequestPermission) {
+			response.Error(c, http.StatusForbidden, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrInvalidFriendRequestStatus) {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Error(c, http.StatusNotFound, "好友申请不存在")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "处理好友申请失败")
 		return
 	}

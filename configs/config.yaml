@@ -5,10 +5,10 @@ server:
   key_file: "/ssl/1.key"
 
 database:
-  username: "root"
+  username: "postgres"
   password: "zyz20050922"
   host: "192.168.3.114"
-  port: 3306
+  port: 5432
   dbname: "graduation_project"
   charset: "utf8mb4"
 

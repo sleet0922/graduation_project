@@ -7,15 +7,17 @@ import (
 )
 
 var (
-	ErrCannotAddSelf = errors.New("不能添加自己为好友")
-	ErrAlreadyFriend = errors.New("你们已经是好友了")
-	ErrRequestExists = errors.New("好友申请已存在")
+	ErrCannotAddSelf              = errors.New("不能添加自己为好友")
+	ErrAlreadyFriend              = errors.New("你们已经是好友了")
+	ErrRequestExists              = errors.New("好友申请已存在")
+	ErrFriendRequestPermission    = errors.New("无权处理该好友申请")
+	ErrInvalidFriendRequestStatus = errors.New("无效的好友申请处理状态")
 )
 
 // ----------好友 service 接口----------
 type FriendService interface {
 	SendFriendRequest(senderID, receiverID uint) error
-	HandleFriendRequest(requestID uint, status uint) error
+	HandleFriendRequest(userID, requestID uint, status uint) error
 	GetFriendRequestsByUserID(userID uint) ([]*model.FriendRequest, error)
 	RemoveFriend(userID, friendID uint) error
 	GetByUserID(userID uint) ([]*model.Friend, error)
@@ -59,10 +61,17 @@ func (s *friendService) SendFriendRequest(senderID, receiverID uint) error {
 	return s.friendRepo.SendFriendRequest(friendRequest)
 }
 
-func (s *friendService) HandleFriendRequest(requestID uint, status uint) error {
+func (s *friendService) HandleFriendRequest(userID, requestID uint, status uint) error {
+	if status != 1 && status != 2 {
+		return ErrInvalidFriendRequestStatus
+	}
+
 	request, err := s.friendRepo.GetRequestByID(requestID)
 	if err != nil {
 		return err
+	}
+	if request.ReceiverID != userID {
+		return ErrFriendRequestPermission
 	}
 	if request.Status != 0 {
 		return nil

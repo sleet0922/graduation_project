@@ -542,7 +542,91 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/requests \
 
 ---
 
-### 15. 获取好友列表（需要认证）
+### 15. 处理好友申请（需要认证）
+
+```bash
+# 接受好友申请
+curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "request_id": 1,
+    "status": 1
+  }'
+
+# 拒绝好友申请
+curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "request_id": 1,
+    "status": 2
+  }'
+```
+
+**请求头:**
+
+- `Authorization`: Bearer Token
+
+**请求参数:**
+
+- `request_id` (必填): 好友申请记录 ID，来自“获取好友请求列表”接口中的 `ID`
+- `status` (必填): 处理结果
+  - `1`: 接受申请
+  - `2`: 拒绝申请
+
+说明：
+
+- 只有当前登录用户作为 `receiver_id` 时，才可以处理这条好友申请
+- 前端应优先从“获取好友请求列表”接口中读取待处理申请，再调用本接口
+- 如果一条申请已经被处理过，再次调用不会重复创建好友关系
+
+**响应示例:**
+
+```json
+{
+  "code": 200,
+  "data": null,
+  "message": "处理好友申请成功"
+}
+```
+
+**常见错误响应:**
+
+```json
+{
+  "code": 400,
+  "data": null,
+  "message": "无效的好友申请处理状态"
+}
+```
+
+```json
+{
+  "code": 403,
+  "data": null,
+  "message": "无权处理该好友申请"
+}
+```
+
+```json
+{
+  "code": 404,
+  "data": null,
+  "message": "好友申请不存在"
+}
+```
+
+**前端处理建议:**
+
+1. 先调用“获取好友请求列表”接口，筛出 `status = 0` 的待处理申请
+2. 用户点击“接受”时，传 `status = 1`
+3. 用户点击“拒绝”时，传 `status = 2`
+4. 处理成功后，重新拉取好友申请列表和好友列表，刷新页面状态
+
+---
+
+### 16. 获取好友列表（需要认证）
 
 ```bash
 curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
@@ -593,7 +677,7 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
 
 ---
 
-### 16. 检查好友关系（需要认证）
+### 17. 检查好友关系（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/friend/check \
@@ -626,7 +710,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/check \
 
 ---
 
-### 17. 删除好友（需要认证）
+### 18. 删除好友（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/friend/delete \
@@ -657,7 +741,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/delete \
 
 ---
 
-### 18. 修改好友备注（需要认证）
+### 19. 修改好友备注（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/friend/remark_update \
@@ -692,7 +776,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/remark_update \
 
 ## 聊天相关 API
 
-### 19. 创建群聊（需要认证）
+### 20. 创建群聊（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/group/create \
@@ -735,7 +819,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/create \
 
 ---
 
-### 20. 拉好友进群（需要认证）
+### 21. 拉好友进群（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/group/member/add \
@@ -790,7 +874,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/member/add \
 
 ---
 
-### 21. 获取群聊列表（需要认证）
+### 22. 获取群聊列表（需要认证）
 
 ```bash
 curl -X GET https://code.gelsomino.cn:8081/api/group/list \
@@ -823,7 +907,7 @@ curl -X GET https://code.gelsomino.cn:8081/api/group/list \
 
 ---
 
-### 22. 获取群成员列表（需要认证）
+### 23. 获取群成员列表（需要认证）
 
 ```bash
 curl -X GET "https://code.gelsomino.cn:8081/api/group/members?group_id=3" \
@@ -867,7 +951,7 @@ curl -X GET "https://code.gelsomino.cn:8081/api/group/members?group_id=3" \
 
 ---
 
-### 23. 踢出群成员（需要认证）
+### 24. 踢出群成员（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/group/member/remove \
@@ -905,7 +989,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/member/remove \
 
 ---
 
-### 24. 退出群聊（需要认证）
+### 25. 退出群聊（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/group/leave \
@@ -941,7 +1025,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/leave \
 
 ---
 
-### 25. 删除群聊（需要认证）
+### 26. 删除群聊（需要认证）
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/group/delete \
@@ -976,10 +1060,10 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/delete \
 
 ---
 
-### 26. 获取云端聊天记录（需要认证）
+### 27. 获取云端聊天记录（需要认证）
 
 ```bash
-# 获取所有好友的聊天记录
+# 获取当前用户所有可见的聊天记录
 curl -X GET "https://code.gelsomino.cn:8081/api/chat/history" \
   -H "Authorization: Bearer $TOKEN"
 
@@ -1005,6 +1089,10 @@ curl -X GET "https://code.gelsomino.cn:8081/api/chat/history?group_id=3" \
 
 - `friend_id` 与 `group_id` 二选一即可
 - 如果都不传，则返回当前用户所有可见的聊天记录（单聊 + 群聊）
+- 这里的“可见”指：
+  - 单聊：当前用户作为发送方或接收方，且未被自己删除的消息
+  - 群聊：当前用户当前所属群聊中的消息，且未被自己删除的消息
+- 不会返回当前用户未加入群聊的群消息
 
 **响应示例:**
 
@@ -1041,10 +1129,10 @@ curl -X GET "https://code.gelsomino.cn:8081/api/chat/history?group_id=3" \
 
 ---
 
-### 27. 删除云端聊天记录（需要认证）
+### 28. 删除云端聊天记录（需要认证）
 
 ```bash
-# 删除所有可见聊天记录（仅删除自己视角，不影响其他用户）
+# 删除当前用户所有可见聊天记录（仅删除自己视角，不影响其他用户）
 curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history" \
   -H "Authorization: Bearer $TOKEN"
 
@@ -1070,6 +1158,10 @@ curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history?group_id=3" \
 
 - `friend_id` 与 `group_id` 二选一即可
 - 不传时删除当前用户所有可见聊天记录
+- 删除范围只包含：
+  - 当前用户自己的单聊记录视角
+  - 当前用户当前所属群聊中的群消息视角
+- 不会影响其他用户，也不会删除当前用户未加入群聊的消息
 
 **响应示例:**
 
@@ -1085,7 +1177,7 @@ curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history?group_id=3" \
 
 ## WebSocket 聊天
 
-### 26. 建立聊天连接
+### 29. 建立聊天连接
 
 **注意**: WebSocket 连接使用 `ws://` 或 `wss://` 协议
 
@@ -1102,7 +1194,7 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 27. 发送聊天消息
+### 30. 发送聊天消息
 
 客户端发送文本消息：
 
@@ -1191,7 +1283,7 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 28. 离线消息
+### 31. 离线消息
 
 - 如果接收方不在线，服务端会把消息暂存在内存里
 - 接收方下次建立 WebSocket 连接后，服务端会立即投递这些消息
@@ -1216,7 +1308,7 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 29. 错误消息
+### 32. 错误消息
 
 ```json
 {
@@ -1305,6 +1397,22 @@ curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=目标用户
 curl -X POST https://code.gelsomino.cn:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account":"目标用户邮箱"}'
 ```
 
+3. **目标用户获取待处理申请列表**（需要认证）
+
+```bash
+curl -X GET https://code.gelsomino.cn:8081/api/friend/requests -H "Authorization: Bearer $TOKEN"
+```
+
+从返回结果中拿到申请记录的 `ID`
+
+4. **目标用户处理好友申请**（需要认证）
+
+```bash
+curl -X POST https://code.gelsomino.cn:8081/api/friend/handle -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"request_id":1,"status":1}'
+```
+
+处理成功后，双方即可在好友列表中看到彼此
+
 ### 注意事项：
 
 - 确保服务运行在 `code.gelsomino.cn:8081`
@@ -1314,9 +1422,11 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/request -H "Content-Type:
 - 加好友时如果目标用户是自己，会返回 `不能添加自己为好友`
 - 加好友时如果双方已经是好友，会返回 `你们已经是好友了`
 - 加好友时如果存在未处理的申请（任一方向），会返回 `好友申请已存在`
+- 处理好友申请时，只有申请接收者本人可以操作；其他用户会收到 `无权处理该好友申请`
 - 需要先注册并登录获取 token 才能测试需要认证的 API
 - 好友功能需要至少注册两个用户进行测试
 - 好友列表接口返回好友的详细信息（名字、账号、邮箱、头像等）
+- 获取全部聊天记录 / 删除全部聊天记录时，只会处理当前用户自己可见的单聊和所在群聊消息
 - 群聊相关接口需要先建立好友关系，当前版本只支持拉好友进群
 - 删除群聊仅允许群主操作
 

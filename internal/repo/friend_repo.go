@@ -50,8 +50,8 @@ func (r *friendRepository) GetByUserID(userID uint) ([]*model.Friend, error) {
 func (r *friendRepository) GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error) {
 	var friendDetails []*model.FriendDetail
 	err := r.db.Table("friend").
-		Select("friend.id, friend.user_id, friend.friend_id, friend.remark, user.account, user.name, user.email, user.avatar, user.gender, user.birthday, user.location").
-		Joins("LEFT JOIN user ON friend.friend_id = user.id").
+		Select("friend.id, friend.user_id, friend.friend_id, friend.remark, \"user\".account, \"user\".name, \"user\".email, \"user\".avatar, \"user\".gender, \"user\".birthday, \"user\".location").
+		Joins("LEFT JOIN \"user\" ON friend.friend_id = \"user\".id").
 		Where("friend.user_id = ?", userID).
 		Find(&friendDetails).Error
 	return friendDetails, err

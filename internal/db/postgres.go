@@ -8,21 +8,20 @@ import (
 	"sleet0922/graduation_project/pkg/logger"
 	"time"
 
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func InitDB(cfg *config.ViperConfig) *gorm.DB {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=disable TimeZone=Asia/Shanghai",
+		cfg.Database.Host,
 		cfg.Database.Username,
 		cfg.Database.Password,
-		cfg.Database.Host,
-		cfg.Database.Port,
 		cfg.Database.Dbname,
-		cfg.Database.Charset,
+		cfg.Database.Port,
 	)
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		logger.Fatal("连接数据库失败", slog.Any("error", err))
 	}

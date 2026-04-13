@@ -1,0 +1,13 @@
+严重: 全量聊天记录接口会把“所有群”的消息都返回给当前用户，因为查询只按 deleted_by 过滤，没有按用户所属群过滤。internal/repo/chat_repo.go (line 50) 同样，清空全部历史时也会把全库群消息都标成当前用户已删除。internal/repo/chat_repo.go (line 77)
+
+严重: 任意已登录用户都能处理任意好友申请，只要知道 request_id。HandleFriendRequest 没校验当前用户是否就是申请接收者。internal/handler/friend_handler.go (line 138) internal/service/friend_service.go (line 62)
+
+高风险: 仓库里直接提交了数据库密码、R2 密钥和 JWT 密钥，这个在真实项目里属于必须立即移除并轮换的级别。configs/config.yaml (line 7) configs/config.yaml (line 15) configs/config.yaml (line 22)
+
+高风险: WebSocket 握手显式关闭了 Origin 校验，同时认证中间件又允许从 query 里取 token；这两个组合起来很容易引出跨站 WebSocket 劫持风险。internal/handler/chat_handler.go (line 69) internal/middleware/auth.go (line 32)
+
+高风险: 预签名上传/下载接口未鉴权，且客户端可传任意 key，等于任何人都能申请任意对象的上传/下载 URL。internal/router/router.go (line 46) internal/handler/oss_handler.go (line 37) internal/handler/oss_handler.go (line 67)
+
+中风险: 用户邮箱没有唯一约束，注册时也不检查重复邮箱；这会让邮箱登录语义变得不稳定，重复注册后 GetByEmail 取到谁并不可靠。internal/model/user.go (line 10) internal/service/user_service.go (line 39)
+
+中风险: CORS 配置同时设置了 Access-Control-Allow-Origin: * 和 Access-Control-Allow-Credentials: true，这本身就是无效/不规范组合，浏览器侧行为会不一致。internal/middleware/cors.go (line 11)
