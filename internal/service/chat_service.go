@@ -27,10 +27,6 @@ type ChatService interface {
 	RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc) string
 	UnregisterConnection(userID uint, connectionID string)
 	SendMessage(fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error)
-	GetHistory(userID, friendID, groupID uint) ([]*model.ChatMessage, error)
-	GetAllHistory(userID uint) ([]*model.ChatMessage, error)
-	DeleteHistory(userID, friendID, groupID uint) error
-	DeleteAllHistory(userID uint) error
 	BroadcastGroupDissolved(groupID uint, userIDs []uint)
 }
 
@@ -43,18 +39,16 @@ type chatConnection struct {
 type chatService struct {
 	friendRepo  repo.FriendRepository
 	groupRepo   repo.GroupRepository
-	chatRepo    repo.ChatRepository
 	mu          sync.RWMutex
 	sequence    uint64
 	connections map[uint]map[string]*chatConnection
 	offline     map[uint][]*model.ChatMessage
 }
 
-func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupRepository, chatRepo repo.ChatRepository) ChatService {
+func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupRepository) ChatService {
 	return &chatService{
 		friendRepo:  friendRepo,
 		groupRepo:   groupRepo,
-		chatRepo:    chatRepo,
 		connections: make(map[uint]map[string]*chatConnection),
 		offline:     make(map[uint][]*model.ChatMessage),
 	}
@@ -139,9 +133,6 @@ func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageTyp
 		Content:          content,
 		CreatedAt:        time.Now(),
 	}
-	if err := s.persistMessage(message); err != nil {
-		return nil, err
-	}
 	s.deliverToUser(toUserID, message)
 	return message, nil
 }
@@ -165,9 +156,6 @@ func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType str
 		Content:          content,
 		CreatedAt:        time.Now(),
 	}
-	if err := s.persistMessage(message); err != nil {
-		return nil, err
-	}
 
 	for _, member := range members {
 		if member.UserID == fromUserID {
@@ -176,46 +164,6 @@ func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType str
 		s.deliverToUser(member.UserID, message)
 	}
 	return message, nil
-}
-
-func (s *chatService) GetHistory(userID, friendID, groupID uint) ([]*model.ChatMessage, error) {
-	if s.chatRepo == nil {
-		return nil, nil
-	}
-	if groupID > 0 {
-		if s.groupRepo == nil || !s.groupRepo.IsMember(groupID, userID) {
-			return nil, ErrGroupMessagePermission
-		}
-		return s.chatRepo.GetGroupHistory(userID, groupID)
-	}
-	return s.chatRepo.GetHistory(userID, friendID)
-}
-
-func (s *chatService) GetAllHistory(userID uint) ([]*model.ChatMessage, error) {
-	if s.chatRepo == nil {
-		return nil, nil
-	}
-	return s.chatRepo.GetAllHistory(userID)
-}
-
-func (s *chatService) DeleteHistory(userID, friendID, groupID uint) error {
-	if s.chatRepo == nil {
-		return nil
-	}
-	if groupID > 0 {
-		if s.groupRepo == nil || !s.groupRepo.IsMember(groupID, userID) {
-			return ErrGroupMessagePermission
-		}
-		return s.chatRepo.DeleteGroupHistory(userID, groupID)
-	}
-	return s.chatRepo.DeleteHistory(userID, friendID)
-}
-
-func (s *chatService) DeleteAllHistory(userID uint) error {
-	if s.chatRepo == nil {
-		return nil
-	}
-	return s.chatRepo.DeleteAllHistory(userID)
 }
 
 func (s *chatService) BroadcastGroupDissolved(groupID uint, userIDs []uint) {
@@ -236,15 +184,6 @@ func (s *chatService) enqueueOfflineMessage(userID uint, message *model.ChatMess
 	defer s.mu.Unlock()
 
 	s.offline[userID] = append(s.offline[userID], message)
-}
-
-func (s *chatService) persistMessage(message *model.ChatMessage) error {
-	if s.chatRepo != nil {
-		if err := s.chatRepo.Save(message); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {

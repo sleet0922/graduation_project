@@ -41,7 +41,6 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 		&model.FriendRequest{},
 		&model.ChatGroup{},
 		&model.ChatGroupMember{},
-		&model.ChatMessage{},
 	)
 	if err != nil {
 		logger.Fatal("数据库迁移失败", slog.Any("error", err))

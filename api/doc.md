@@ -1060,124 +1060,9 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/delete \
 
 ---
 
-### 27. 获取云端聊天记录（需要认证）
-
-```bash
-# 获取当前用户所有可见的聊天记录
-curl -X GET "https://code.gelsomino.cn:8081/api/chat/history" \
-  -H "Authorization: Bearer $TOKEN"
-
-# 获取指定好友的聊天记录
-curl -X GET "https://code.gelsomino.cn:8081/api/chat/history?friend_id=1" \
-  -H "Authorization: Bearer $TOKEN"
-
-# 获取指定群聊的聊天记录
-curl -X GET "https://code.gelsomino.cn:8081/api/chat/history?group_id=3" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `friend_id` (可选): 指定好友的用户 ID
-- `group_id` (可选): 指定群聊 ID
-
-说明：
-
-- `friend_id` 与 `group_id` 二选一即可
-- 如果都不传，则返回当前用户所有可见的聊天记录（单聊 + 群聊）
-- 这里的“可见”指：
-  - 单聊：当前用户作为发送方或接收方，且未被自己删除的消息
-  - 群聊：当前用户当前所属群聊中的消息，且未被自己删除的消息
-- 不会返回当前用户未加入群聊的群消息
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": [
-    {
-      "id": "1738221800123456789-1",
-      "conversation_type": "single",
-      "from_user_id": 8,
-      "to_user_id": 9,
-      "group_id": 0,
-      "message_type": "text",
-      "content": "你好",
-      "created_at": "2026-03-31T13:10:20Z",
-      "updated_at": "2026-03-31T13:10:20Z"
-    },
-    {
-      "id": "1775157056220740834-13",
-      "conversation_type": "group",
-      "from_user_id": 32,
-      "to_user_id": 0,
-      "group_id": 3,
-      "message_type": "image",
-      "content": "https://853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/sleet/chat/32/1775157055_test.png",
-      "created_at": "2026-04-03T03:10:56+08:00",
-      "updated_at": "2026-04-03T03:10:56+08:00"
-    }
-  ],
-  "message": "获取成功"
-}
-```
-
----
-
-### 28. 删除云端聊天记录（需要认证）
-
-```bash
-# 删除当前用户所有可见聊天记录（仅删除自己视角，不影响其他用户）
-curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history" \
-  -H "Authorization: Bearer $TOKEN"
-
-# 删除与指定好友的聊天记录（仅删除自己视角，不影响对方）
-curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history?friend_id=1" \
-  -H "Authorization: Bearer $TOKEN"
-
-# 删除指定群聊的聊天记录（仅删除自己视角，不影响其他群成员）
-curl -X DELETE "https://code.gelsomino.cn:8081/api/chat/history?group_id=3" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `friend_id` (可选): 指定好友的用户 ID
-- `group_id` (可选): 指定群聊 ID
-
-说明：
-
-- `friend_id` 与 `group_id` 二选一即可
-- 不传时删除当前用户所有可见聊天记录
-- 删除范围只包含：
-  - 当前用户自己的单聊记录视角
-  - 当前用户当前所属群聊中的群消息视角
-- 不会影响其他用户，也不会删除当前用户未加入群聊的消息
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "删除成功"
-}
-```
-
----
-
 ## WebSocket 聊天
 
-### 29. 建立聊天连接
+### 27. 建立聊天连接
 
 **注意**: WebSocket 连接使用 `ws://` 或 `wss://` 协议
 
@@ -1194,7 +1079,7 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 30. 发送聊天消息
+### 28. 发送聊天消息
 
 客户端发送文本消息：
 
@@ -1283,12 +1168,11 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 31. 离线消息
+### 29. 离线消息
 
 - 如果接收方不在线，服务端会把消息暂存在内存里
 - 接收方下次建立 WebSocket 连接后，服务端会立即投递这些消息
 - 服务端成功投递后，就会从内存中删除对应离线消息
-- 这些消息会写入数据库，支持后续查询云端聊天记录
 
 离线消息投递时格式如下：
 
@@ -1308,7 +1192,7 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 32. 错误消息
+### 30. 错误消息
 
 ```json
 {
@@ -1426,7 +1310,6 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/handle -H "Content-Type: 
 - 需要先注册并登录获取 token 才能测试需要认证的 API
 - 好友功能需要至少注册两个用户进行测试
 - 好友列表接口返回好友的详细信息（名字、账号、邮箱、头像等）
-- 获取全部聊天记录 / 删除全部聊天记录时，只会处理当前用户自己可见的单聊和所在群聊消息
 - 群聊相关接口需要先建立好友关系，当前版本只支持拉好友进群
 - 删除群聊仅允许群主操作
 

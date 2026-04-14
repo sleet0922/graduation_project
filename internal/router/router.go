@@ -31,11 +31,10 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	ossHandler := handler.NewOssHandler(cfg)
 	friendRepo := repo.NewFriendRepository(db)
 	groupRepo := repo.NewGroupRepository(db)
-	chatRepo := repo.NewChatRepository(db)
 	friendService := service.NewFriendService(friendRepo)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo)
-	chatService := service.NewChatService(friendRepo, groupRepo, chatRepo)
-	
+	chatService := service.NewChatService(friendRepo, groupRepo)
+
 	friendHandler := handler.NewFriendHandler(friendService, userService, jwtManager)
 	groupHandler := handler.NewGroupHandler(groupService, chatService)
 	chatHandler := handler.NewChatHandler(chatService, jwtManager)
@@ -68,8 +67,6 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.GET("/api/group/list", jwtMiddleware.Auth(), groupHandler.GetGroups)
 	r.GET("/api/group/members", jwtMiddleware.Auth(), groupHandler.GetMembers)
 	r.POST("/api/user/delete", jwtMiddleware.Auth(), userHandler.Delete)
-	r.GET("/api/chat/history", jwtMiddleware.Auth(), chatHandler.GetHistory)
-	r.DELETE("/api/chat/history", jwtMiddleware.Auth(), chatHandler.DeleteHistory)
 
 	return r
 }

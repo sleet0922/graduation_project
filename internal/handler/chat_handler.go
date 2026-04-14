@@ -9,7 +9,6 @@ import (
 	"sleet0922/graduation_project/pkg/jwt"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
-	"strconv"
 	"sync"
 	"time"
 
@@ -196,98 +195,4 @@ func (w *chatSocketWriter) Ping(ctx context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.conn.Ping(ctx)
-}
-
-func (h *ChatHandler) GetHistory(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
-		return
-	}
-	userID := userIDVal.(uint)
-
-	groupIDStr := c.Query("group_id")
-	if groupIDStr != "" {
-		groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
-		if err != nil {
-			response.Error(c, http.StatusBadRequest, "无效的group_id")
-			return
-		}
-		messages, err := h.chatService.GetHistory(userID, 0, uint(groupID))
-		if err != nil {
-			response.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		response.Success(c, messages, "获取成功")
-		return
-	}
-
-	friendIDStr := c.Query("friend_id")
-	if friendIDStr != "" {
-		friendID, err := strconv.ParseUint(friendIDStr, 10, 32)
-		if err != nil {
-			response.Error(c, http.StatusBadRequest, "无效的friend_id")
-			return
-		}
-		messages, err := h.chatService.GetHistory(userID, uint(friendID), 0)
-		if err != nil {
-			response.Error(c, http.StatusInternalServerError, "获取记录失败")
-			return
-		}
-		response.Success(c, messages, "获取成功")
-		return
-	}
-
-	messages, err := h.chatService.GetAllHistory(userID)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "获取记录失败")
-		return
-	}
-	response.Success(c, messages, "获取成功")
-}
-
-func (h *ChatHandler) DeleteHistory(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
-		return
-	}
-	userID := userIDVal.(uint)
-
-	groupIDStr := c.Query("group_id")
-	if groupIDStr != "" {
-		groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
-		if err != nil {
-			response.Error(c, http.StatusBadRequest, "无效的group_id")
-			return
-		}
-		err = h.chatService.DeleteHistory(userID, 0, uint(groupID))
-		if err != nil {
-			response.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		response.Success(c, nil, "删除成功")
-		return
-	}
-
-	friendIDStr := c.Query("friend_id")
-	if friendIDStr != "" {
-		friendID, err := strconv.ParseUint(friendIDStr, 10, 32)
-		if err != nil {
-			response.Error(c, http.StatusBadRequest, "无效的friend_id")
-			return
-		}
-		err = h.chatService.DeleteHistory(userID, uint(friendID), 0)
-		if err != nil {
-			response.Error(c, http.StatusInternalServerError, "删除失败")
-			return
-		}
-	} else {
-		err := h.chatService.DeleteAllHistory(userID)
-		if err != nil {
-			response.Error(c, http.StatusInternalServerError, "删除失败")
-			return
-		}
-	}
-	response.Success(c, nil, "删除成功")
 }
