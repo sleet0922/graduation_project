@@ -34,6 +34,12 @@ type JWTConfig struct {
 	SecretKey string `json:"secret_key" mapstructure:"secret_key"`
 }
 
+type RTCConfig struct {
+	AppID              string `json:"app_id" mapstructure:"app_id"`
+	AppKey             string `json:"app_key" mapstructure:"app_key"`
+	TokenExpireSeconds int    `json:"token_expire_seconds" mapstructure:"token_expire_seconds"`
+}
+
 type LogConfig struct {
 	Level    string `json:"level" mapstructure:"level"`
 	Filename string `json:"filename" mapstructure:"filename"`
@@ -44,6 +50,7 @@ type ViperConfig struct {
 	Database DatabaseConfig `json:"database"`
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
+	RTC      RTCConfig      `json:"rtc" mapstructure:"rtc"`
 	Log      LogConfig      `json:"log" mapstructure:"log"`
 	Redis    RedisConfig    `json:"redis" mapstructure:"redis"`
 }

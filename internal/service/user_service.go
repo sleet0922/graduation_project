@@ -113,7 +113,8 @@ func (s *userService) UpdatePassword(userID uint, oldPassword, newPassword strin
 	if err != nil {
 		return errors.New("用户不存在")
 	}
-	if err := security.CheckPassword(user.Password, oldPassword); err != nil {
+	err = security.CheckPassword(user.Password, oldPassword)
+	if err != nil {
 		return errors.New("原密码错误")
 	}
 	hashedPassword, err := security.HashPassword(newPassword)

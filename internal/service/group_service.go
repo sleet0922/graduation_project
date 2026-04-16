@@ -55,7 +55,8 @@ func (s *groupService) CreateGroup(ownerID uint, name, avatar string, memberIDs 
 		return nil, ErrGroupMembersEmpty
 	}
 
-	if err := s.validateInvitees(ownerID, memberIDs); err != nil {
+	err := s.validateInvitees(ownerID, memberIDs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -78,7 +79,8 @@ func (s *groupService) CreateGroup(ownerID uint, name, avatar string, memberIDs 
 		})
 	}
 
-	if err := s.groupRepo.Create(group, members); err != nil {
+	err = s.groupRepo.Create(group, members)
+	if err != nil {
 		return nil, err
 	}
 
@@ -98,7 +100,8 @@ func (s *groupService) AddMembers(operatorID, groupID uint, memberIDs []uint) ([
 		return nil, ErrGroupMembersEmpty
 	}
 
-	if err := s.validateInvitees(operatorID, memberIDs); err != nil {
+	err := s.validateInvitees(operatorID, memberIDs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -111,7 +114,8 @@ func (s *groupService) AddMembers(operatorID, groupID uint, memberIDs []uint) ([
 			Role:      "member",
 		})
 	}
-	if err := s.groupRepo.AddMembers(groupID, members); err != nil {
+	err = s.groupRepo.AddMembers(groupID, members)
+	if err != nil {
 		return nil, err
 	}
 	return s.GetMembers(operatorID, groupID)

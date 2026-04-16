@@ -11,3 +11,6 @@ du -sh ./
 git add .
 git commit -m "$(date +%Y-%m-%d)"
 git push origin main
+
+//优化编译
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -extldflags=-static" -gcflags="all=-l=4 -B -C" -o ./main ./cmd/api/main.go

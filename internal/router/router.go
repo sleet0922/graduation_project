@@ -34,10 +34,12 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	friendService := service.NewFriendService(friendRepo)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo)
 	chatService := service.NewChatService(friendRepo, groupRepo)
+	rtcService := service.NewRTCService(cfg, userRepo, friendRepo, groupRepo, chatService)
 
 	friendHandler := handler.NewFriendHandler(friendService, userService, jwtManager)
 	groupHandler := handler.NewGroupHandler(groupService, chatService)
 	chatHandler := handler.NewChatHandler(chatService, jwtManager)
+	rtcHandler := handler.NewRTCHandler(rtcService)
 
 	r.POST("/api/user/register", userHandler.Register)
 	r.POST("/api/user/login", userHandler.Login)
@@ -66,6 +68,12 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/group/delete", jwtMiddleware.Auth(), groupHandler.Delete)
 	r.GET("/api/group/list", jwtMiddleware.Auth(), groupHandler.GetGroups)
 	r.GET("/api/group/members", jwtMiddleware.Auth(), groupHandler.GetMembers)
+	r.POST("/api/rtc/call/invite", jwtMiddleware.Auth(), rtcHandler.Invite)
+	r.POST("/api/rtc/call/accept", jwtMiddleware.Auth(), rtcHandler.Accept)
+	r.POST("/api/rtc/call/reject", jwtMiddleware.Auth(), rtcHandler.Reject)
+	r.POST("/api/rtc/call/cancel", jwtMiddleware.Auth(), rtcHandler.Cancel)
+	r.POST("/api/rtc/call/hangup", jwtMiddleware.Auth(), rtcHandler.Hangup)
+	r.POST("/api/rtc/token", jwtMiddleware.Auth(), rtcHandler.GetToken)
 	r.POST("/api/user/delete", jwtMiddleware.Auth(), userHandler.Delete)
 
 	return r

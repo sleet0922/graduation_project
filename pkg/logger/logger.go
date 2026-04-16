@@ -34,9 +34,10 @@ func InitLogger(cfg *config.ViperConfig) {
 		logLevel = slog.LevelInfo
 	}
 
-	// 创建日志文件夹+文件
-	if err := os.MkdirAll(filepath.Dir(logConfig.Filename), os.ModePerm); err != nil {
-		panic("创建日志目录失败: " + err.Error())
+	// 创建日志文件夹 + 文件
+	err := os.MkdirAll(filepath.Dir(logConfig.Filename), os.ModePerm)
+	if err != nil {
+		panic("创建日志目录失败：" + err.Error())
 	}
 	logFile, err := os.OpenFile(logConfig.Filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {

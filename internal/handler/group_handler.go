@@ -27,7 +27,8 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	}
 
 	var req createGroupRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -53,7 +54,8 @@ func (h *GroupHandler) AddMembers(c *gin.Context) {
 	}
 
 	var req addGroupMembersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -79,7 +81,8 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 	}
 
 	var req removeGroupMemberRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -90,7 +93,8 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 
-	if err := h.groupService.RemoveMember(userID, req.GroupID, req.MemberID); err != nil {
+	err = h.groupService.RemoveMember(userID, req.GroupID, req.MemberID)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -103,7 +107,8 @@ func (h *GroupHandler) Leave(c *gin.Context) {
 	}
 
 	var req leaveGroupRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -114,7 +119,8 @@ func (h *GroupHandler) Leave(c *gin.Context) {
 		return
 	}
 
-	if err := h.groupService.LeaveGroup(userID, req.GroupID); err != nil {
+	err = h.groupService.LeaveGroup(userID, req.GroupID)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -127,7 +133,8 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 	}
 
 	var req deleteGroupRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -140,7 +147,8 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 
 	members, _ := h.groupService.GetMembers(userID, req.GroupID)
 
-	if err := h.groupService.DeleteGroup(userID, req.GroupID); err != nil {
+	err = h.groupService.DeleteGroup(userID, req.GroupID)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}

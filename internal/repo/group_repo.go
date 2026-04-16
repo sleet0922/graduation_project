@@ -29,7 +29,8 @@ func NewGroupRepository(db *gorm.DB) GroupRepository {
 
 func (r *groupRepository) Create(group *model.ChatGroup, members []*model.ChatGroupMember) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(group).Error; err != nil {
+		err := tx.Create(group).Error
+		if err != nil {
 			return err
 		}
 		if len(members) == 0 {
@@ -59,7 +60,8 @@ func (r *groupRepository) RemoveMember(groupID, userID uint) error {
 
 func (r *groupRepository) DeleteGroup(groupID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("group_id = ?", groupID).Delete(&model.ChatGroupMember{}).Error; err != nil {
+		err := tx.Where("group_id = ?", groupID).Delete(&model.ChatGroupMember{}).Error
+		if err != nil {
 			return err
 		}
 		return tx.Delete(&model.ChatGroup{}, groupID).Error
@@ -68,7 +70,8 @@ func (r *groupRepository) DeleteGroup(groupID uint) error {
 
 func (r *groupRepository) GetByID(groupID uint) (*model.ChatGroup, error) {
 	var group model.ChatGroup
-	if err := r.db.First(&group, groupID).Error; err != nil {
+	err := r.db.First(&group, groupID).Error
+	if err != nil {
 		return nil, err
 	}
 	return &group, nil

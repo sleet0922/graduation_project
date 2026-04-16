@@ -109,7 +109,8 @@ func (h *UserHandler) Login(c *gin.Context) {
 	}
 
 	var req LoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -122,12 +123,12 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	accessToken, err := h.jwtManager.GenerateToken(user.ID, user.Account, accessTokenExpiresIn)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "生成token失败")
+		response.Error(c, http.StatusInternalServerError, "生成 token 失败")
 		return
 	}
 	refreshToken, err := h.jwtManager.GenerateRefreshToken(user.ID, user.Account, refreshTokenExpiresIn)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "生成refresh token失败")
+		response.Error(c, http.StatusInternalServerError, "生成 refresh token 失败")
 		return
 	}
 
@@ -155,7 +156,8 @@ func (h *UserHandler) RefreshToken(c *gin.Context) {
 	}
 
 	var req RefreshTokenRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -185,7 +187,8 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 		Avatar string `json:"avatar" binding:"required"`
 	}
 	var req UpdateAvatarRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -207,7 +210,8 @@ func (h *UserHandler) UpdateName(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	var req UpdateNameRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -230,7 +234,8 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		NewPassword string `json:"new_password" binding:"required"`
 	}
 	var req UpdatePasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
@@ -254,7 +259,8 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		Location string `json:"location"`
 	}
 	var req UpdateProfileRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}

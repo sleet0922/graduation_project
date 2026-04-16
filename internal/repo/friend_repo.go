@@ -98,13 +98,16 @@ func (r *friendRepository) GetRequestsByReceiverID(receiverID uint) ([]*model.Fr
 func (r *friendRepository) AcceptFriendRequest(request *model.FriendRequest) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		request.Status = 1
-		if err := tx.Save(request).Error; err != nil {
+		err := tx.Save(request).Error
+		if err != nil {
 			return err
 		}
-		if err := tx.Create(&model.Friend{UserID: request.SenderID, FriendID: request.ReceiverID}).Error; err != nil {
+		err = tx.Create(&model.Friend{UserID: request.SenderID, FriendID: request.ReceiverID}).Error
+		if err != nil {
 			return err
 		}
-		if err := tx.Create(&model.Friend{UserID: request.ReceiverID, FriendID: request.SenderID}).Error; err != nil {
+		err = tx.Create(&model.Friend{UserID: request.ReceiverID, FriendID: request.SenderID}).Error
+		if err != nil {
 			return err
 		}
 		return nil
@@ -113,10 +116,12 @@ func (r *friendRepository) AcceptFriendRequest(request *model.FriendRequest) err
 
 func (r *friendRepository) RemoveBothFriends(userID, friendID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND friend_id = ?", userID, friendID).Delete(&model.Friend{}).Error; err != nil {
+		err := tx.Where("user_id = ? AND friend_id = ?", userID, friendID).Delete(&model.Friend{}).Error
+		if err != nil {
 			return err
 		}
-		if err := tx.Where("user_id = ? AND friend_id = ?", friendID, userID).Delete(&model.Friend{}).Error; err != nil {
+		err = tx.Where("user_id = ? AND friend_id = ?", friendID, userID).Delete(&model.Friend{}).Error
+		if err != nil {
 			return err
 		}
 		return nil

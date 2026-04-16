@@ -22,6 +22,11 @@ oss:
 jwt:
   secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"
 
+rtc:
+  app_id: "69de80fd8770340178b8e840"
+  app_key: "6076c0daf2ca4d4cb8ef6132e9b1767f"
+  token_expire_seconds: 7200
+
 log:
   level: "info"
   filename: "logs/app.log"

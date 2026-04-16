@@ -108,11 +108,8 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			Message: message,
 			Offline: offline,
 		}, !offline)
-	}, func(eventType string, groupID uint) error {
-		return writer.WriteChat(ctx, chatOutgoingMessage{
-			Type:    eventType,
-			GroupID: groupID,
-		}, false)
+	}, func(payload any) error {
+		return writer.WriteAny(ctx, payload, true)
 	})
 	logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
 
@@ -123,25 +120,28 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 
 	for {
 		var incoming chatIncomingMessage
-		if err := wsjson.Read(ctx, conn, &incoming); err != nil {
+		err := wsjson.Read(ctx, conn, &incoming)
+		if err != nil {
 			return
 		}
 
 		if incoming.Type != "chat" {
-			if err := writer.Write(ctx, chatOutgoingMessage{
+			err = writer.Write(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: "不支持的消息类型",
-			}); err != nil {
+			})
+			if err != nil {
 				return
 			}
 			continue
 		}
 
 		if incoming.ToUserID == 0 && incoming.GroupID == 0 {
-			if err := writer.Write(ctx, chatOutgoingMessage{
+			err = writer.Write(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: "接收方或群聊不能为空",
-			}); err != nil {
+			})
+			if err != nil {
 				return
 			}
 			continue
@@ -149,10 +149,10 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 
 		message, err := h.chatService.SendMessage(userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
 		if err != nil {
-			if err := writer.Write(ctx, chatOutgoingMessage{
+			if writeErr := writer.Write(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: err.Error(),
-			}); err != nil {
+			}); writeErr != nil {
 				return
 			}
 			continue
@@ -175,6 +175,10 @@ func (w *chatSocketWriter) Write(ctx context.Context, payload chatOutgoingMessag
 }
 
 func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMessage, verifyAlive bool) error {
+	return w.WriteAny(ctx, payload, verifyAlive)
+}
+
+func (w *chatSocketWriter) WriteAny(ctx context.Context, payload any, verifyAlive bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if verifyAlive {
