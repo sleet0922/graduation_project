@@ -4,6 +4,9 @@ git remote set-url origin git@github.com:sleet0922/graduation_project.git
 git pull origin main
 git status
 
+//增量，清除垃圾
+git gc --prune=now
+
 //看大小
 du -sh ./
 
