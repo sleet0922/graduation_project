@@ -31,7 +31,9 @@ type OSSConfig struct {
 }
 
 type JWTConfig struct {
-	SecretKey string `json:"secret_key" mapstructure:"secret_key"`
+	SecretKey                 string `json:"secret_key" mapstructure:"secret_key"`
+	AccessTokenExpireSeconds  int    `json:"access_token_expire_seconds" mapstructure:"access_token_expire_seconds"`
+	RefreshTokenExpireSeconds int    `json:"refresh_token_expire_seconds" mapstructure:"refresh_token_expire_seconds"`
 }
 
 type RTCConfig struct {

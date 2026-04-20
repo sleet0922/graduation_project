@@ -21,6 +21,8 @@ oss:
 
 jwt:
   secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"
+  access_token_expire_seconds: 86400
+  refresh_token_expire_seconds: 2592000
 
 rtc:
   app_id: "69de80fd8770340178b8e840"

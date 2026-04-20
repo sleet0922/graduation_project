@@ -51,7 +51,7 @@ func (h *FriendHandler) Create(c *gin.Context) {
 
 	// 如果提供了 account，则去查找对应的 friend_id
 	if req.Account != "" {
-		user, err := h.userService.SearchUser(req.Account)
+		user, err := h.userService.SearchUser(c.Request.Context(), req.Account)
 		if err != nil {
 			response.Error(c, http.StatusNotFound, "未找到该用户")
 			return

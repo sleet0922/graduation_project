@@ -27,12 +27,15 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	// 依赖注入
 	userRepo := repo.NewUserRepository(db)
 	userService := service.NewUserService(userRepo)
-	userHandler := handler.NewUserHandler(userService, jwtManager)
+	userHandler := handler.NewUserHandler(userService, jwtManager, cfg)
 	ossHandler := handler.NewOssHandler(cfg)
 	friendRepo := repo.NewFriendRepository(db)
 	groupRepo := repo.NewGroupRepository(db)
+	e2eeKeyRepo := repo.NewE2EEKeyRepository(db)
+	e2eeGroupKeyRepo := repo.NewE2EEGroupKeyRepository(db)
+	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo)
 	friendService := service.NewFriendService(friendRepo)
-	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo)
+	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService)
 	chatService := service.NewChatService(friendRepo, groupRepo)
 	rtcService := service.NewRTCService(cfg, userRepo, friendRepo, groupRepo, chatService)
 
@@ -40,6 +43,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	groupHandler := handler.NewGroupHandler(groupService, chatService)
 	chatHandler := handler.NewChatHandler(chatService, jwtManager)
 	rtcHandler := handler.NewRTCHandler(rtcService)
+	e2eeHandler := handler.NewE2EEHandler(e2eeService)
 
 	r.POST("/api/user/register", userHandler.Register)
 	r.POST("/api/user/login", userHandler.Login)
@@ -74,6 +78,11 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/rtc/call/cancel", jwtMiddleware.Auth(), rtcHandler.Cancel)
 	r.POST("/api/rtc/call/hangup", jwtMiddleware.Auth(), rtcHandler.Hangup)
 	r.POST("/api/rtc/token", jwtMiddleware.Auth(), rtcHandler.GetToken)
+	r.POST("/api/e2ee/keys/publish", jwtMiddleware.Auth(), e2eeHandler.PublishPublicKey)
+	r.GET("/api/e2ee/keys/public", jwtMiddleware.Auth(), e2eeHandler.GetPublicKey)
+	r.POST("/api/e2ee/group/key/publish", jwtMiddleware.Auth(), e2eeHandler.PublishGroupKeyBoxes)
+	r.GET("/api/e2ee/group/key/current", jwtMiddleware.Auth(), e2eeHandler.GetGroupCurrentKey)
+	r.GET("/api/e2ee/group/key/by-version", jwtMiddleware.Auth(), e2eeHandler.GetGroupKeyByVersion)
 	r.POST("/api/user/delete", jwtMiddleware.Auth(), userHandler.Delete)
 
 	return r

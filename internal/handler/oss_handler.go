@@ -107,8 +107,8 @@ func (h *OssHandler) UploadChatImage(c *gin.Context) {
 		return
 	}
 	contentType := file.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "image/") {
-		response.Error(c, http.StatusBadRequest, "仅支持图片上传")
+	if !strings.HasPrefix(contentType, "image/") && contentType != "application/octet-stream" {
+		response.Error(c, http.StatusBadRequest, "仅支持图片或二进制流上传")
 		return
 	}
 

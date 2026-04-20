@@ -53,7 +53,7 @@ func GinRecovery() gin.HandlerFunc {
 				if isError(err) {
 					logger.Error(c.Request.URL.Path, slog.Any("error", err), slog.String("request", string(req)))
 					if e, ok := err.(error); ok {
-						c.Error(e)
+						_ = c.Error(e)
 					}
 					c.Abort()
 					return

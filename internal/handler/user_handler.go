@@ -3,7 +3,9 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/internal/service"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/jwt"
 	"sleet0922/graduation_project/pkg/response"
 	"time"
@@ -11,21 +13,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	accessTokenExpiresIn  = time.Hour * 24
-	refreshTokenExpiresIn = time.Hour * 24 * 30
-)
-
 type UserHandler struct {
-	userService service.UserService
-	jwtManager  *jwt.JWTManager
+	userService           service.UserService
+	jwtManager            *jwt.JWTManager
+	accessTokenExpiresIn  time.Duration
+	refreshTokenExpiresIn time.Duration
 }
 
 // ----------用户 handler 构造函数----------
-func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager) *UserHandler {
+func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, cfg *config.ViperConfig) *UserHandler {
+	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
+	if accessTokenTTL <= 0 {
+		accessTokenTTL = 24 * time.Hour
+	}
+	refreshTokenTTL := time.Duration(cfg.JWT.RefreshTokenExpireSeconds) * time.Second
+	if refreshTokenTTL <= 0 {
+		refreshTokenTTL = 30 * 24 * time.Hour
+	}
+
 	return &UserHandler{
-		userService: userService,
-		jwtManager:  jwtManager,
+		userService:           userService,
+		jwtManager:            jwtManager,
+		accessTokenExpiresIn:  accessTokenTTL,
+		refreshTokenExpiresIn: refreshTokenTTL,
 	}
 }
 
@@ -33,12 +43,16 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager)
 func (h *UserHandler) GetSelf(c *gin.Context) {
 	userID, err := h.getUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	user, err := h.userService.GetSelf(userID)
+	user, err := h.userService.GetSelf(c.Request.Context(), userID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "获取用户信息失败")
+		if err == service.ErrUserNotFound {
+			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
+			return
+		}
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 	response.Success(c, user, "获取用户信息成功")
@@ -47,13 +61,17 @@ func (h *UserHandler) GetSelf(c *gin.Context) {
 func (h *UserHandler) SearchUser(c *gin.Context) {
 	keyword := c.Query("keyword")
 	if keyword == "" {
-		response.Error(c, http.StatusBadRequest, "缺少搜索关键字")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 
-	user, err := h.userService.SearchUser(keyword)
+	user, err := h.userService.SearchUser(c.Request.Context(), keyword)
 	if err != nil {
-		response.Error(c, http.StatusNotFound, "未找到该用户")
+		if err == service.ErrUserNotFound {
+			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
+			return
+		}
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 
@@ -85,13 +103,17 @@ func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 
-	user, err := h.userService.Register(req.Email, req.Password)
+	user, err := h.userService.Register(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "注册失败")
+		if err == service.ErrUserAlreadyExists {
+			response.Result(c, http.StatusOK, errcode.ErrorUserExist, nil)
+			return
+		}
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 	response.Success(c, gin.H{
@@ -111,32 +133,36 @@ func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 
-	user, err := h.userService.Login(req.Account, req.Password)
+	user, err := h.userService.Login(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, err.Error())
+		if err == service.ErrInvalidCredentials {
+			response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
+			return
+		}
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 
-	accessToken, err := h.jwtManager.GenerateToken(user.ID, user.Account, accessTokenExpiresIn)
+	accessToken, err := h.jwtManager.GenerateToken(user.ID, user.Account, h.accessTokenExpiresIn)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "生成 token 失败")
+		response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 		return
 	}
-	refreshToken, err := h.jwtManager.GenerateRefreshToken(user.ID, user.Account, refreshTokenExpiresIn)
+	refreshToken, err := h.jwtManager.GenerateRefreshToken(user.ID, user.Account, h.refreshTokenExpiresIn)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "生成 refresh token 失败")
+		response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 		return
 	}
 
 	response.Success(c, gin.H{
 		"token":              accessToken,
 		"refresh_token":      refreshToken,
-		"expires_in":         int(accessTokenExpiresIn.Seconds()),
-		"refresh_expires_in": int(refreshTokenExpiresIn.Seconds()),
+		"expires_in":         int(h.accessTokenExpiresIn.Seconds()),
+		"refresh_expires_in": int(h.refreshTokenExpiresIn.Seconds()),
 		"user": gin.H{
 			"id":       user.ID,
 			"account":  user.Account,
@@ -158,27 +184,27 @@ func (h *UserHandler) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 
-	accessToken, err := h.jwtManager.RefreshAccessToken(req.RefreshToken, accessTokenExpiresIn)
+	accessToken, err := h.jwtManager.RefreshAccessToken(req.RefreshToken, h.accessTokenExpiresIn)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "refresh token无效")
+		response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 		return
 	}
 
-	refreshToken, err := h.jwtManager.RotateRefreshToken(req.RefreshToken, refreshTokenExpiresIn)
+	refreshToken, err := h.jwtManager.RotateRefreshToken(req.RefreshToken, h.refreshTokenExpiresIn)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "refresh token无效")
+		response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 		return
 	}
 
 	response.Success(c, gin.H{
 		"token":              accessToken,
 		"refresh_token":      refreshToken,
-		"expires_in":         int(accessTokenExpiresIn.Seconds()),
-		"refresh_expires_in": int(refreshTokenExpiresIn.Seconds()),
+		"expires_in":         int(h.accessTokenExpiresIn.Seconds()),
+		"refresh_expires_in": int(h.refreshTokenExpiresIn.Seconds()),
 	}, "刷新token成功")
 }
 
@@ -186,20 +212,21 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 	type UpdateAvatarRequest struct {
 		Avatar string `json:"avatar" binding:"required"`
 	}
+
 	var req UpdateAvatarRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 	userID, err := h.getUserID(c)
 	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	user, err := h.userService.UpdateAvatar(userID, req.Avatar)
+	user, err := h.userService.UpdateAvatar(c.Request.Context(), userID, req.Avatar)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "更新头像失败")
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 	response.Success(c, gin.H{"id": user.ID, "object_key": user.Avatar}, "更新头像成功")
@@ -209,20 +236,21 @@ func (h *UserHandler) UpdateName(c *gin.Context) {
 	type UpdateNameRequest struct {
 		Name string `json:"name" binding:"required"`
 	}
+
 	var req UpdateNameRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 	userID, err := h.getUserID(c)
 	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	user, err := h.userService.UpdateName(userID, req.Name)
+	user, err := h.userService.UpdateName(c.Request.Context(), userID, req.Name)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "更新用户名失败")
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 	response.Success(c, gin.H{"id": user.ID, "name": user.Name}, "更新用户名成功")
@@ -233,20 +261,29 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		Password    string `json:"password" binding:"required"`
 		NewPassword string `json:"new_password" binding:"required"`
 	}
+
 	var req UpdatePasswordRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 	userID, err := h.getUserID(c)
 	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	err = h.userService.UpdatePassword(userID, req.Password, req.NewPassword)
+	err = h.userService.UpdatePassword(c.Request.Context(), userID, req.Password, req.NewPassword)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, err.Error())
+		if err == service.ErrUserNotFound {
+			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
+			return
+		}
+		if err == service.ErrOldPasswordIncorrect {
+			response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
+			return
+		}
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 	response.Success(c, nil, "更新密码成功")
@@ -258,20 +295,21 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		Birthday string `json:"birthday"`
 		Location string `json:"location"`
 	}
+
 	var req UpdateProfileRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
 	userID, err := h.getUserID(c)
 	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	user, err := h.userService.UpdateProfile(userID, req.Gender, req.Birthday, req.Location)
+	user, err := h.userService.UpdateProfile(c.Request.Context(), userID, req.Gender, req.Birthday, req.Location)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "更新资料失败")
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 	response.Success(c, gin.H{
@@ -285,13 +323,13 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 func (h *UserHandler) Delete(c *gin.Context) {
 	userID, err := h.getUserID(c)
 	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	err = h.userService.Delete(userID)
+	err = h.userService.Delete(c.Request.Context(), userID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "删除用户失败")
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
 

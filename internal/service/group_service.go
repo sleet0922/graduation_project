@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
@@ -34,13 +35,15 @@ type groupService struct {
 	groupRepo  repo.GroupRepository
 	friendRepo repo.FriendRepository
 	userRepo   repo.UserRepository
+	e2ee       E2EEService
 }
 
-func NewGroupService(groupRepo repo.GroupRepository, friendRepo repo.FriendRepository, userRepo repo.UserRepository) GroupService {
+func NewGroupService(groupRepo repo.GroupRepository, friendRepo repo.FriendRepository, userRepo repo.UserRepository, e2ee E2EEService) GroupService {
 	return &groupService{
 		groupRepo:  groupRepo,
 		friendRepo: friendRepo,
 		userRepo:   userRepo,
+		e2ee:       e2ee,
 	}
 }
 
@@ -83,6 +86,11 @@ func (s *groupService) CreateGroup(ownerID uint, name, avatar string, memberIDs 
 	if err != nil {
 		return nil, err
 	}
+	if s.e2ee != nil {
+		if err := s.e2ee.RotateGroupKey(context.Background(), group.ID, ownerID); err != nil {
+			return nil, err
+		}
+	}
 
 	return s.buildGroupDetail(group)
 }
@@ -118,6 +126,11 @@ func (s *groupService) AddMembers(operatorID, groupID uint, memberIDs []uint) ([
 	if err != nil {
 		return nil, err
 	}
+	if s.e2ee != nil {
+		if err := s.e2ee.RotateGroupKey(context.Background(), groupID, operatorID); err != nil {
+			return nil, err
+		}
+	}
 	return s.GetMembers(operatorID, groupID)
 }
 
@@ -135,7 +148,13 @@ func (s *groupService) RemoveMember(operatorID, groupID, memberID uint) error {
 	if !s.groupRepo.IsMember(groupID, memberID) {
 		return ErrGroupMemberNotFound
 	}
-	return s.groupRepo.RemoveMember(groupID, memberID)
+	if err := s.groupRepo.RemoveMember(groupID, memberID); err != nil {
+		return err
+	}
+	if s.e2ee != nil {
+		return s.e2ee.RotateGroupKey(context.Background(), groupID, operatorID)
+	}
+	return nil
 }
 
 func (s *groupService) LeaveGroup(userID, groupID uint) error {
@@ -149,7 +168,13 @@ func (s *groupService) LeaveGroup(userID, groupID uint) error {
 	if group.OwnerID == userID {
 		return ErrGroupLeaveDenied
 	}
-	return s.groupRepo.RemoveMember(groupID, userID)
+	if err := s.groupRepo.RemoveMember(groupID, userID); err != nil {
+		return err
+	}
+	if s.e2ee != nil {
+		return s.e2ee.RotateGroupKey(context.Background(), groupID, userID)
+	}
+	return nil
 }
 
 func (s *groupService) DeleteGroup(operatorID, groupID uint) error {
@@ -192,7 +217,7 @@ func (s *groupService) GetMembers(userID, groupID uint) ([]*model.ChatGroupMembe
 
 	result := make([]*model.ChatGroupMemberDetail, 0, len(members))
 	for _, member := range members {
-		user, err := s.userRepo.GetByID(member.UserID)
+		user, err := s.userRepo.GetByID(context.Background(), member.UserID)
 		if err != nil || user == nil {
 			return nil, ErrGroupMemberNotFound
 		}
@@ -210,7 +235,7 @@ func (s *groupService) GetMembers(userID, groupID uint) ([]*model.ChatGroupMembe
 
 func (s *groupService) validateInvitees(operatorID uint, memberIDs []uint) error {
 	for _, memberID := range memberIDs {
-		user, err := s.userRepo.GetByID(memberID)
+		user, err := s.userRepo.GetByID(context.Background(), memberID)
 		if err != nil || user == nil {
 			return ErrGroupMemberNotFound
 		}

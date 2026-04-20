@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -149,7 +150,7 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "peer_id 和 group_id 必须二选一"}
 	}
 
-	inviter, err := s.userRepo.GetByID(userID)
+	inviter, err := s.userRepo.GetByID(context.Background(), userID)
 	if err != nil {
 		return nil, s.mapRecordError(err, "用户不存在", "获取用户信息失败")
 	}
@@ -159,7 +160,7 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 		if req.PeerID == userID {
 			return nil, &RTCServiceError{HTTPCode: 403, Message: "无权限发起该通话"}
 		}
-		if _, err := s.userRepo.GetByID(req.PeerID); err != nil {
+		if _, err := s.userRepo.GetByID(context.Background(), req.PeerID); err != nil {
 			return nil, s.mapRecordError(err, "呼叫对象不存在", "校验呼叫对象失败")
 		}
 		if !s.friendRepo.CheckFriendship(userID, req.PeerID) {

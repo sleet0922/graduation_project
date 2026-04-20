@@ -9,7 +9,6 @@ import (
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/redis"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,7 +167,6 @@ func (s *chatService) UnregisterConnection(userID uint, connectionID string) {
 }
 
 func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
-	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, ErrMessageEmpty
 	}

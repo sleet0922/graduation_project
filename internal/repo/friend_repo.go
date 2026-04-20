@@ -4,6 +4,7 @@ import (
 	"sleet0922/graduation_project/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type FriendRepository interface {
@@ -52,14 +53,17 @@ func (r *friendRepository) GetFriendDetailsByUserID(userID uint) ([]*model.Frien
 	err := r.db.Table("friend").
 		Select("friend.id, friend.user_id, friend.friend_id, friend.remark, \"user\".account, \"user\".name, \"user\".email, \"user\".avatar, \"user\".gender, \"user\".birthday, \"user\".location").
 		Joins("LEFT JOIN \"user\" ON friend.friend_id = \"user\".id").
-		Where("friend.user_id = ?", userID).
+		Where("friend.user_id = ? AND friend.deleted_at IS NULL", userID).
 		Find(&friendDetails).Error
 	return friendDetails, err
 }
 
 func (r *friendRepository) CheckFriendship(userID uint, friendID uint) bool {
 	var friend model.Friend
-	err := r.db.Where("user_id = ? AND friend_id = ?", userID, friendID).First(&friend).Error
+	err := r.db.Where(
+		"(user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)",
+		userID, friendID, friendID, userID,
+	).First(&friend).Error
 	return err == nil
 }
 
@@ -102,11 +106,17 @@ func (r *friendRepository) AcceptFriendRequest(request *model.FriendRequest) err
 		if err != nil {
 			return err
 		}
-		err = tx.Create(&model.Friend{UserID: request.SenderID, FriendID: request.ReceiverID}).Error
+		err = tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
+			DoNothing: true,
+		}).Create(&model.Friend{UserID: request.SenderID, FriendID: request.ReceiverID}).Error
 		if err != nil {
 			return err
 		}
-		err = tx.Create(&model.Friend{UserID: request.ReceiverID, FriendID: request.SenderID}).Error
+		err = tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
+			DoNothing: true,
+		}).Create(&model.Friend{UserID: request.ReceiverID, FriendID: request.SenderID}).Error
 		if err != nil {
 			return err
 		}
