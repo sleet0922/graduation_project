@@ -44,7 +44,7 @@ func (r *friendRepository) Delete(friend *model.Friend) error {
 
 func (r *friendRepository) GetByUserID(userID uint) ([]*model.Friend, error) {
 	var friends []*model.Friend
-	err := r.db.Where("user_id = ?", userID).Find(&friends).Error
+	err := r.db.Where("user_id = ? AND deleted_at IS NULL", userID).Find(&friends).Error
 	return friends, err
 }
 
@@ -61,20 +61,26 @@ func (r *friendRepository) GetFriendDetailsByUserID(userID uint) ([]*model.Frien
 func (r *friendRepository) CheckFriendship(userID uint, friendID uint) bool {
 	var friend model.Friend
 	err := r.db.Where(
-		"(user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)",
+		"((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)) AND deleted_at IS NULL",
 		userID, friendID, friendID, userID,
 	).First(&friend).Error
 	return err == nil
 }
 
 func (r *friendRepository) SendFriendRequest(friendRequest *model.FriendRequest) error {
-	return r.db.Create(friendRequest).Error
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "sender_id"}, {Name: "receiver_id"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"status":     0,
+			"deleted_at": nil,
+		}),
+	}).Create(friendRequest).Error
 }
 
 func (r *friendRepository) CheckRequestExists(senderID, receiverID uint) (bool, error) {
 	var count int64
 	err := r.db.Where(
-		"status = 0 AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+		"status = 0 AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)) AND deleted_at IS NULL",
 		senderID, receiverID, receiverID, senderID,
 	).Model(&model.FriendRequest{}).Count(&count).Error
 	if err != nil {
@@ -85,7 +91,7 @@ func (r *friendRepository) CheckRequestExists(senderID, receiverID uint) (bool, 
 
 func (r *friendRepository) GetRequestByID(requestID uint) (*model.FriendRequest, error) {
 	var request model.FriendRequest
-	err := r.db.First(&request, requestID).Error
+	err := r.db.Where("deleted_at IS NULL").First(&request, requestID).Error
 	return &request, err
 }
 
@@ -95,7 +101,7 @@ func (r *friendRepository) UpdateRequestStatus(request *model.FriendRequest) err
 
 func (r *friendRepository) GetRequestsByReceiverID(receiverID uint) ([]*model.FriendRequest, error) {
 	var requests []*model.FriendRequest
-	err := r.db.Where("receiver_id = ?", receiverID).Find(&requests).Error
+	err := r.db.Where("receiver_id = ? AND deleted_at IS NULL", receiverID).Find(&requests).Error
 	return requests, err
 }
 
@@ -106,16 +112,23 @@ func (r *friendRepository) AcceptFriendRequest(request *model.FriendRequest) err
 		if err != nil {
 			return err
 		}
+		// 使用 OnConflict 处理软删除后的重新添加
 		err = tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
-			DoNothing: true,
+			Columns: []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				"deleted_at": nil,
+				"remark":     "",
+			}),
 		}).Create(&model.Friend{UserID: request.SenderID, FriendID: request.ReceiverID}).Error
 		if err != nil {
 			return err
 		}
 		err = tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
-			DoNothing: true,
+			Columns: []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				"deleted_at": nil,
+				"remark":     "",
+			}),
 		}).Create(&model.Friend{UserID: request.ReceiverID, FriendID: request.SenderID}).Error
 		if err != nil {
 			return err

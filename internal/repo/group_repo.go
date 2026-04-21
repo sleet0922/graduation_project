@@ -48,8 +48,12 @@ func (r *groupRepository) AddMembers(groupID uint, members []*model.ChatGroupMem
 		return nil
 	}
 	return r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "group_id"}, {Name: "user_id"}},
-		DoNothing: true,
+		Columns: []clause.Column{{Name: "group_id"}, {Name: "user_id"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"deleted_at": nil,
+			"role":       "member",
+			"inviter_id": gorm.Expr("EXCLUDED.inviter_id"),
+		}),
 	}).Create(&members).Error
 }
 
@@ -70,7 +74,7 @@ func (r *groupRepository) DeleteGroup(groupID uint) error {
 
 func (r *groupRepository) GetByID(groupID uint) (*model.ChatGroup, error) {
 	var group model.ChatGroup
-	err := r.db.First(&group, groupID).Error
+	err := r.db.Where("deleted_at IS NULL").First(&group, groupID).Error
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +85,7 @@ func (r *groupRepository) GetGroupsByUserID(userID uint) ([]*model.ChatGroup, er
 	var groups []*model.ChatGroup
 	err := r.db.Model(&model.ChatGroup{}).
 		Joins("JOIN chat_group_member ON chat_group_member.group_id = chat_group.id").
-		Where("chat_group_member.user_id = ? AND chat_group_member.deleted_at IS NULL", userID).
+		Where("chat_group_member.user_id = ? AND chat_group_member.deleted_at IS NULL AND chat_group.deleted_at IS NULL", userID).
 		Order("chat_group.updated_at desc").
 		Find(&groups).Error
 	return groups, err
@@ -89,7 +93,7 @@ func (r *groupRepository) GetGroupsByUserID(userID uint) ([]*model.ChatGroup, er
 
 func (r *groupRepository) GetMembersByGroupID(groupID uint) ([]*model.ChatGroupMember, error) {
 	var members []*model.ChatGroupMember
-	err := r.db.Where("group_id = ?", groupID).
+	err := r.db.Where("group_id = ? AND deleted_at IS NULL", groupID).
 		Order("created_at asc").
 		Find(&members).Error
 	return members, err
@@ -98,7 +102,7 @@ func (r *groupRepository) GetMembersByGroupID(groupID uint) ([]*model.ChatGroupM
 func (r *groupRepository) CountMembers(groupID uint) (int64, error) {
 	var count int64
 	err := r.db.Model(&model.ChatGroupMember{}).
-		Where("group_id = ?", groupID).
+		Where("group_id = ? AND deleted_at IS NULL", groupID).
 		Count(&count).Error
 	return count, err
 }
@@ -106,7 +110,7 @@ func (r *groupRepository) CountMembers(groupID uint) (int64, error) {
 func (r *groupRepository) IsMember(groupID, userID uint) bool {
 	var count int64
 	err := r.db.Model(&model.ChatGroupMember{}).
-		Where("group_id = ? AND user_id = ?", groupID, userID).
+		Where("group_id = ? AND user_id = ? AND deleted_at IS NULL", groupID, userID).
 		Count(&count).Error
 	return err == nil && count > 0
 }

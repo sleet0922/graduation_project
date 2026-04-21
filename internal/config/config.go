@@ -28,6 +28,7 @@ type OSSConfig struct {
 	Bucket          string `json:"bucket" mapstructure:"bucket"`
 	Endpoint        string `json:"endpoint" mapstructure:"endpoint"`
 	BasePath        string `json:"base_path" mapstructure:"base_path"`
+	CDNDomain       string `json:"cdn_domain" mapstructure:"cdn_domain"`
 }
 
 type JWTConfig struct {

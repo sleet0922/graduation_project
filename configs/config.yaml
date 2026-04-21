@@ -13,11 +13,12 @@ database:
   charset: "utf8mb4"
 
 oss:
-  access_key_id: "f7077ffaba23ec48af7b0a492701126d"
-  secret_access_key: "5b70748ffc99052961e06324a290258408b429f1f4c4ab93548736718e3e0679"
+  access_key_id: "0CsZkaRGG_4IifjzH4NOcMN4jGbngAoNoZBK7rsQ"
+  secret_access_key: "S3flntD41AG3rS75BdcRR3Yrb-Y_PxIjRgvFT7W1"
   bucket: "sleet"
-  endpoint: "https://853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com"
-  base_path: "sleet"
+  endpoint: "https://s3-cn-east-1.qiniucs.com"
+  base_path: ""
+  cdn_domain: "http://cdn.gelsomino.cn"
 
 jwt:
   secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"

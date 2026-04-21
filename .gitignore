@@ -21,3 +21,4 @@ nohup.out
 .idea/
 app.log
 .codex
+logs/app.log

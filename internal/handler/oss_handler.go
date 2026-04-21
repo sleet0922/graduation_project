@@ -12,27 +12,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// OssHandler 对象存储处理器
-// 负责处理与Cloudflare R2对象存储相关的HTTP请求
 type OssHandler struct {
-	r2Client *oss.CloudflareR2 // R2客户端
+	kodoClient *oss.QiniuKodo
 }
 
-// NewOssHandler 创建OSS处理器实例
-// cfg: 应用配置，用于初始化R2客户端
 func NewOssHandler(cfg *config.ViperConfig) *OssHandler {
 	return &OssHandler{
-		r2Client: oss.NewCloudflareR2(cfg),
+		kodoClient: oss.NewQiniuKodo(cfg),
 	}
 }
 
 // GetUploadURL 获取文件上传URL
-// 生成一个临时的、带签名的上传URL，前端可以直接使用PUT方法上传文件到R2
+// 生成一个临时的、带签名的上传URL，前端可以直接使用PUT方法上传到七牛云
 // 请求参数:
-//   - key: 文件在R2中的存储名称（如：user123.jpg）
+//   - key: 文件在存储中的名称（如：avatar_3_1776731300657.jpg）
+//   - type: 文件类型，可选值为 "avatar"(头像) 或 "chat"(聊天图片)，默认为 "chat"
 //
 // 返回:
 //   - upload_url: 预签名上传URL（有效期1小时）
+//   - access_url: 文件访问URL（上传成功后可直接使用）
 //   - expires_in: URL有效期说明
 func (h *OssHandler) GetUploadURL(c *gin.Context) {
 	// 获取文件key参数
@@ -41,17 +39,35 @@ func (h *OssHandler) GetUploadURL(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "缺少key参数")
 		return
 	}
-
+	// 获取文件类型，决定存储路径
+	fileType := c.Query("type")
+	if fileType == "" {
+		fileType = "chat" // 默认聊天图片
+	}
+	// 根据类型添加路径前缀
+	var fullObjectKey string
+	switch fileType {
+	case "avatar":
+		fullObjectKey = "avatar/" + objectKey
+	case "chat":
+		fullObjectKey = "chat/" + objectKey
+	default:
+		fullObjectKey = objectKey
+	}
 	// 生成预签名上传URL（有效期1小时）
-	url, err := h.r2Client.GetPresignedUploadURL(c.Request.Context(), objectKey, time.Hour)
+	presignedURL, err := h.kodoClient.GetPresignedUploadURL(c.Request.Context(), fullObjectKey, time.Hour)
 	if err != nil {
 		fmt.Printf("生成上传URL失败: %v\n", err)
 		response.Error(c, http.StatusInternalServerError, "生成上传URL失败")
 		return
 	}
 
+	// 生成访问URL
+	accessURL := h.kodoClient.GetPublicURL(fullObjectKey)
+
 	response.Success(c, gin.H{
-		"upload_url": url,
+		"upload_url": presignedURL,
+		"access_url": accessURL,
 		"expires_in": "1小时",
 	}, "获取上传URL成功")
 }
@@ -73,7 +89,7 @@ func (h *OssHandler) GetDownloadURL(c *gin.Context) {
 	}
 
 	// 生成预签名下载URL（有效期1小时）
-	url, err := h.r2Client.GetPresignedDownloadURL(c.Request.Context(), objectKey, time.Hour)
+	url, err := h.kodoClient.GetPresignedDownloadURL(c.Request.Context(), objectKey, time.Hour)
 	if err != nil {
 		fmt.Printf("生成下载URL失败: %v\n", err)
 		response.Error(c, http.StatusInternalServerError, "生成下载URL失败")
@@ -113,7 +129,7 @@ func (h *OssHandler) UploadChatImage(c *gin.Context) {
 	}
 
 	userID := userIDVal.(uint)
-	fileURL, err := h.r2Client.UploadFile(c.Request.Context(), file, fmt.Sprintf("chat/%d", userID))
+	fileURL, err := h.kodoClient.UploadFile(c.Request.Context(), file, fmt.Sprintf("chat/%d", userID))
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "上传聊天图片失败")
 		return

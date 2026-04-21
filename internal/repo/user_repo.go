@@ -43,7 +43,7 @@ func (r *userRepository) Update(ctx context.Context, user *model.User) error {
 
 func (r *userRepository) GetByID(ctx context.Context, id uint) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("id = ?", id).First(&user).Error
+	err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", id).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (r *userRepository) GetByID(ctx context.Context, id uint) (*model.User, err
 
 func (r *userRepository) GetByAccount(ctx context.Context, account string) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("account = ?", account).First(&user).Error
+	err := r.db.WithContext(ctx).Where("account = ? AND deleted_at IS NULL", account).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (r *userRepository) GetByAccount(ctx context.Context, account string) (*mod
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
+	err := r.db.WithContext(ctx).Where("email = ? AND deleted_at IS NULL", email).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (r *userRepository) UpdateProfile(ctx context.Context, userID uint, gender 
 
 func (r *userRepository) GetSelf(ctx context.Context, userID uint) (*model.User, error) {
 	var user model.User
-	err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error
+	err := r.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", userID).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
