@@ -49,7 +49,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/user/login", userHandler.Login)
 	r.POST("/api/user/refresh", userHandler.RefreshToken)
 	r.GET("/api/oss/upload-url", jwtMiddleware.Auth(), ossHandler.GetUploadURL)
-	r.GET("/api/oss/download-url", jwtMiddleware.Auth(), ossHandler.GetDownloadURL)
+	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
 	r.GET("/ws/chat", jwtMiddleware.Auth(), chatHandler.Connect)
 	r.POST("/api/chat/upload/image", jwtMiddleware.Auth(), ossHandler.UploadChatImage)
 	r.POST("/api/user/avatar_update", jwtMiddleware.Auth(), userHandler.UpdateAvatar)

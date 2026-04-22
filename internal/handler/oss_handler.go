@@ -88,8 +88,18 @@ func (h *OssHandler) GetDownloadURL(c *gin.Context) {
 		return
 	}
 
+	// 根据key前缀自动添加路径
+	var fullObjectKey string
+	if strings.HasPrefix(objectKey, "avatar_") {
+		fullObjectKey = "avatar/" + objectKey
+	} else if strings.HasPrefix(objectKey, "chat_") {
+		fullObjectKey = "chat/" + objectKey
+	} else {
+		fullObjectKey = objectKey
+	}
+
 	// 生成预签名下载URL（有效期1小时）
-	url, err := h.kodoClient.GetPresignedDownloadURL(c.Request.Context(), objectKey, time.Hour)
+	url, err := h.kodoClient.GetPresignedDownloadURL(c.Request.Context(), fullObjectKey, time.Hour)
 	if err != nil {
 		fmt.Printf("生成下载URL失败: %v\n", err)
 		response.Error(c, http.StatusInternalServerError, "生成下载URL失败")
