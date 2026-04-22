@@ -1,22 +1,121 @@
+# ZAT 即时通讯系统 API 文档
+
+> 版本: v1.0  
+> 基础地址: `https://code.gelsomino.cn:8081`  
+> 文档更新时间: 2026-04-22
+
+---
+
+## 目录
+
+1. [概述](#概述)
+2. [认证机制](#认证机制)
+3. [用户相关 API](#用户相关-api)
+4. [OSS 文件存储 API](#oss-文件存储-api)
+5. [好友相关 API](#好友相关-api)
+6. [群聊相关 API](#群聊相关-api)
+7. [WebSocket 实时聊天](#websocket-实时聊天)
+8. [E2EE 端到端加密 API](#e2ee-端到端加密-api)
+9. [RTC 实时通话 API](#rtc-实时通话-api)
+10. [附录](#附录)
+
+---
+
+## 概述
+
+### 基础信息
+
+| 项目 | 说明 |
+|------|------|
+| 协议 | HTTPS / WSS |
+| 数据格式 | JSON |
+| 字符编码 | UTF-8 |
+| 时区 | 服务器使用 UTC，返回时间字符串带时区信息 |
+
+### 通用响应格式
+
+所有 API 响应均遵循以下格式：
+
+```json
+{
+  "code": 200,
+  "data": {},
+  "message": "操作成功"
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `code` | int | 业务状态码，200 表示成功 |
+| `data` | any | 响应数据，失败时可能为 null |
+| `message` | string | 提示信息 |
+
+### 认证方式
+
+需要认证的接口必须在请求头中携带：
+
+```
+Authorization: Bearer <token>
+```
+
+---
+
+## 认证机制
+
+### Token 体系
+
+系统采用双 Token 机制：
+
+| Token 类型 | 有效期 | 用途 |
+|------------|--------|------|
+| Access Token | 1 天 | 访问受保护接口 |
+| Refresh Token | 30 天 | 刷新 Access Token |
+
+### Token 刷新流程
+
+```
+┌─────────────┐     Access Token 过期      ┌─────────────┐
+│   客户端     │ ─────────────────────────> │   服务端     │
+└─────────────┘                            └─────────────┘
+       │                                          │
+       │  使用 Refresh Token 调用 /api/user/refresh │
+       │<───────────────────────────────────────────┘
+       │                                          │
+       │        返回新的 Access & Refresh Token    │
+       │<───────────────────────────────────────────┘
+```
+
+---
+
 ## 用户相关 API
 
 ### 1. 用户注册
+
+**接口地址：** `POST /api/user/register`
+
+**认证要求：** 否
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 邮箱地址，用于登录 |
+| `password` | string | 是 | 密码，建议 6-20 位 |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/register \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "sleet0528@outlook.com",
-    "password": "Zyz20050922!"
+    "email": "user@example.com",
+    "password": "your_password"
   }'
 ```
 
-**请求参数:**
-
-- `email` (必填): 邮箱地址（用于登录）
-- `password` (必填): 密码
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -24,32 +123,44 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/register \
   "data": {
     "id": 8,
     "account": "0762353747",
-    "email": "sleet0528@outlook.com",
+    "email": "user@example.com",
     "name": "未命名用户"
   },
   "message": "注册成功"
 }
 ```
 
+**说明：**
+- 注册成功后系统自动生成 10 位随机数字账号
+- 账号用于好友搜索，邮箱用于登录
+
 ---
 
 ### 2. 用户登录
+
+**接口地址：** `POST /api/user/login`
+
+**认证要求：** 否
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `account` | string | 是 | 邮箱或 10 位数字账号 |
+| `password` | string | 是 | 密码 |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/login \
   -H "Content-Type: application/json" \
   -d '{
-    "account": "sleet0528@outlook.com",
-    "password": "Zyz20050922!"
+    "account": "user@example.com",
+    "password": "your_password"
   }'
 ```
 
-**请求参数:**
-
-- `account` (必填): 账号（支持邮箱或10位随机数字账号）
-- `password` (必填): 密码
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -64,7 +175,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/login \
       "account": "0762353747",
       "name": "未命名用户",
       "avatar": "",
-      "email": "sleet0528@outlook.com",
+      "email": "user@example.com",
       "gender": 0,
       "birthday": "",
       "location": ""
@@ -74,45 +185,51 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/login \
 }
 ```
 
-**说明:**
+**用户对象字段说明：**
 
-- 用户注册时，系统会自动生成一个10位随机数字账号作为唯一标识
-- 登录时可以使用注册时的邮箱或生成的账号
-- 账号主要用于好友搜索，邮箱主要用于登录
-- `token` 为 access token，默认有效期 1 天
-- `refresh_token` 用于续期 access token，默认有效期 30 天
-
-**保存 token 用于后续测试:**
-
-```bash
-export TOKEN="你的token"
-export REFRESH_TOKEN="你的refresh_token"
-```
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | uint | 用户唯一 ID |
+| `account` | string | 10 位数字账号 |
+| `name` | string | 用户昵称 |
+| `avatar` | string | 头像 URL 或文件名 |
+| `email` | string | 邮箱地址 |
+| `gender` | int | 性别：0-未知，1-男，2-女 |
+| `birthday` | string | 生日，格式 YYYY-MM-DD |
+| `location` | string | 地区 |
 
 ---
 
-### 3. 刷新 token
+### 3. 刷新 Token
+
+**接口地址：** `POST /api/user/refresh`
+
+**认证要求：** 否
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `refresh_token` | string | 是 | 登录时返回的 refresh token |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/refresh \
   -H "Content-Type: application/json" \
   -d '{
-    "refresh_token": "'"$REFRESH_TOKEN"'"
+    "refresh_token": "your_refresh_token"
   }'
 ```
 
-**请求参数:**
-
-- `refresh_token` (必填): 登录时返回的 refresh token
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
   "code": 200,
   "data": {
-    "token": "新的access token",
-    "refresh_token": "新的refresh token",
+    "token": "新的access_token",
+    "refresh_token": "新的refresh_token",
     "expires_in": 86400,
     "refresh_expires_in": 2592000
   },
@@ -120,18 +237,15 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/refresh \
 }
 ```
 
-**说明:**
-
-- 当 access token 过期时，客户端应调用该接口换取新 token
-- 刷新成功后，客户端需要同时更新本地保存的 `token` 和 `refresh_token`
-- 如果 refresh token 也过期了，才需要重新登录
-
-```
 ---
 
-### 4. 获取用户信息（需要认证）
+### 4. 获取当前用户信息
 
-**注意**: 如果服务器配置为 `mode: "debug"`，请将 `https://` 改为 `http://`
+**接口地址：** `POST /api/user/self`
+
+**认证要求：** 是
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/self \
@@ -139,24 +253,20 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/self \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
   "code": 200,
   "data": {
     "ID": 6,
-    "name": "test@example.com",
+    "name": "张三",
     "account": "6158726193",
-    "email": "test@example.com",
-    "avatar": "",
-    "gender": 0,
-    "birthday": "",
-    "location": "",
+    "email": "user@example.com",
+    "avatar": "avatar_6_1776183103821.jpg",
+    "gender": 1,
+    "birthday": "2000-01-01",
+    "location": "北京",
     "user_status": 0
   },
   "message": "获取用户信息成功"
@@ -165,17 +275,25 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/self \
 
 ---
 
-### 5. 搜索用户（可选认证）
+### 5. 搜索用户
+
+**接口地址：** `GET /api/user/search`
+
+**认证要求：** 否
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `keyword` | string | 是 | 邮箱或 10 位数字账号 |
+
+**请求示例：**
 
 ```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=sleet0528@outlook"
+curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=user@example.com"
 ```
 
-**请求参数:**
-
-- `keyword` (必填): 要搜索的账号（10位数字）或邮箱地址
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -183,105 +301,111 @@ curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=sleet0528@ou
   "data": {
     "id": 8,
     "account": "0762353747",
-    "name": "未命名用户",
-    "avatar": "",
-    "email": "sleet0528@outlook",
-    "gender": 0,
-    "birthday": "",
-    "location": ""
+    "name": "张三",
+    "avatar": "avatar_8_1776183103821.jpg",
+    "email": "user@example.com",
+    "gender": 1,
+    "birthday": "2000-01-01",
+    "location": "北京"
   },
   "message": "搜索用户成功"
 }
 ```
 
-**返回字段说明:**
-
-- `id`: 用户ID
-- `account`: 用户账号
-- `name`: 用户名字
-- `avatar`: 用户头像
-- `email`: 用户邮箱
-- `gender`: 用户性别 (0:未知, 1:男, 2:女)
-- `birthday`: 用户生日
-- `location`: 用户位置
-
-**使用流程:**
-
-1. 前端调用搜索用户接口，输入邮箱或账号
-2. 后端返回用户详细信息（名字、邮箱、账号、头像、生日等）
-3. 前端展示用户信息，用户点击"发送好友请求"按钮
-4. 前端调用发送好友请求接口，携带目标用户的邮箱或账号
-
 ---
 
-### 6. 更新用户名（需要认证）
+### 6. 更新用户名
+
+**接口地址：** `POST /api/user/name_update`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 新用户名 |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/name_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "name": "张三"
-  }'
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `name` (必填): 新用户名
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": {
-    "id": 6,
-    "name": "张三"
-  },
-  "message": "更新用户名成功"
-}
+  -d '{"name": "张三"}'
 ```
 
 ---
 
-### 7. 更新密码（需要认证）
+### 7. 更新用户头像
+
+**接口地址：** `POST /api/user/avatar_update`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `avatar` | string | 是 | 头像文件名或完整 URL |
+
+**请求示例：**
+
+```bash
+curl -X POST https://code.gelsomino.cn:8081/api/user/avatar_update \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"avatar": "avatar_6_1776183103821.jpg"}'
+```
+
+**说明：**
+- 建议先调用 `/api/oss/upload-url` 上传头像图片
+- 上传成功后使用返回的文件名作为 avatar 值
+
+---
+
+### 8. 更新密码
+
+**接口地址：** `POST /api/user/password_update`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `password` | string | 是 | 原密码 |
+| `new_password` | string | 是 | 新密码 |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/password_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
-    "password": "123456",
-    "new_password": "newpassword123"
+    "password": "old_password",
+    "new_password": "new_password"
   }'
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `password` (必填): 原密码
-- `new_password` (必填): 新密码
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "更新密码成功"
-}
 ```
 
 ---
 
-### 8. 更新用户资料（需要认证）
+### 9. 更新用户资料
+
+**接口地址：** `POST /api/user/profile_update`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `gender` | int | 否 | 性别：0-未知，1-男，2-女 |
+| `birthday` | string | 否 | 生日，格式 YYYY-MM-DD |
+| `location` | string | 否 | 地区 |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/user/profile_update \
@@ -294,86 +418,139 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/profile_update \
   }'
 ```
 
-**请求头:**
+---
 
-- `Authorization`: Bearer Token
+### 10. 删除用户/注销账号
 
-**请求参数:**
+**接口地址：** `POST /api/user/delete`
 
-- `gender` (可选): 性别 (0:未知, 1:男, 2:女)
-- `birthday` (可选): 生日字符串，如 "2000-01-01"
-- `location` (可选): 地区字符串
+**认证要求：** 是
 
-**响应示例:**
+**请求示例：**
 
-```json
-{
-  "code": 200,
-  "data": {
-    "id": 6,
-    "gender": 1,
-    "birthday": "2000-01-01",
-    "location": "北京"
-  },
-  "message": "更新资料成功"
-}
+```bash
+curl -X POST https://code.gelsomino.cn:8081/api/user/delete \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
-## OSS 相关 API
+## OSS 文件存储 API
 
-### 9. 获取上传 URL
+### 存储路径说明
+
+| 文件类型 | 存储路径 | 示例 |
+|----------|----------|------|
+| 头像 | `avatar/` | `avatar/avatar_6_1776183103821.jpg` |
+| 聊天图片 | `chat/` | `chat/chat_6_1776183103821_0.jpg` |
+
+### 11. 获取上传 URL
+
+**接口地址：** `GET /api/oss/upload-url`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `key` | string | 是 | 文件名 |
+| `type` | string | 否 | 文件类型：`avatar`(头像) 或 `chat`(聊天图片)，默认 `chat` |
+
+**请求示例：**
 
 ```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=test.jpg"
+# 上传头像
+curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=avatar_6_1776183103821.jpg&type=avatar" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 上传聊天图片
+curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=chat_6_1776183103821_0.jpg&type=chat" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-**请求参数:**
-
-- `key`: 上传的文件键
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
   "code": 200,
   "data": {
-    "expires_in": "1小时",
-    "upload_url": "https://sleet.853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/test.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."
+    "upload_url": "https://sleet.s3-cn-east-1.qiniucs.com/avatar/avatar_6_1776183103821.jpg?X-Amz-Algorithm=...",
+    "access_url": "https://cdn.gelsomino.cn/avatar/avatar_6_1776183103821.jpg",
+    "expires_in": "1小时"
   },
   "message": "获取上传URL成功"
 }
 ```
 
----
+**字段说明：**
 
-### 10. 获取下载 URL
+| 字段 | 说明 |
+|------|------|
+| `upload_url` | 预签名上传 URL，直接使用 PUT 方法上传文件 |
+| `access_url` | 文件访问 URL，上传成功后可通过此 URL 访问 |
+| `expires_in` | 上传 URL 有效期 |
 
-```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/oss/download-url?key=test.jpg"
+**上传流程：**
+
+```
+1. 调用 /api/oss/upload-url 获取预签名上传 URL
+2. 使用 PUT 方法将文件上传到 upload_url
+3. 使用 access_url 作为文件的访问地址
 ```
 
-**请求参数:**
+---
 
-- `key`: 下载的文件键
+### 12. 获取下载 URL
 
-**响应示例:**
+**接口地址：** `GET /api/oss/download-url`
+
+**认证要求：** 否
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `key` | string | 是 | 文件名 |
+
+**请求示例：**
+
+```bash
+curl -X GET "https://code.gelsomino.cn:8081/api/oss/download-url?key=avatar_6_1776183103821.jpg"
+```
+
+**响应示例：**
 
 ```json
 {
   "code": 200,
   "data": {
-    "download_url": "https://sleet.853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/test.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+    "download_url": "https://sleet.s3-cn-east-1.qiniucs.com/avatar/avatar_6_1776183103821.jpg?X-Amz-Algorithm=...",
     "expires_in": "1小时"
   },
   "message": "获取下载URL成功"
 }
 ```
 
+**说明：**
+- 后端会自动根据 key 前缀添加路径（`avatar_` → `avatar/`，`chat_` → `chat/`）
+- 下载 URL 有效期为 1 小时
+
 ---
 
-### 11. 上传聊天图片（需要认证）
+### 13. 上传聊天图片（直传）
+
+**接口地址：** `POST /api/chat/upload/image`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `file` | file | 是 | 图片文件，支持常见 image/* 类型，最大 10MB |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/chat/upload/image \
@@ -381,22 +558,14 @@ curl -X POST https://code.gelsomino.cn:8081/api/chat/upload/image \
   -F "file=@./test.png"
 ```
 
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `file` (必填): 图片文件，支持常见 `image/*` 类型，大小不能超过 10MB
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
   "code": 200,
   "data": {
-    "url": "https://853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/sleet/chat/32/1775157055_test.png",
-    "content": "https://853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/sleet/chat/32/1775157055_test.png",
+    "url": "https://cdn.gelsomino.cn/chat/chat_6_1776183103821_0.png",
+    "content": "https://cdn.gelsomino.cn/chat/chat_6_1776183103821_0.png",
     "filename": "test.png",
     "contentType": "image/png"
   },
@@ -404,116 +573,49 @@ curl -X POST https://code.gelsomino.cn:8081/api/chat/upload/image \
 }
 ```
 
-说明：
-
-- 返回的 `content` 字段可以直接作为 WebSocket 图片消息的 `content`
-
----
-
-### 12. 删除用户/注销账号（需要认证）
-
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/delete \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "删除用户成功"
-}
-```
-
 ---
 
 ## 好友相关 API
 
-### 13. 发送好友请求（需要认证）
+### 14. 发送好友请求
+
+**接口地址：** `POST /api/friend/request`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `account` | string | 可选 | 好友的邮箱或账号 |
+| `friend_id` | uint | 可选 | 好友用户 ID，与 account 二选一 |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/friend/request \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "account": "sleet0528@outlook"
-  }'
+  -d '{"account": "user@example.com"}'
 ```
 
-（或者使用 `"friend_id": 8`）
+**边界场景响应：**
 
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `account` (可选): 好友的用户账号或邮箱地址
-- `friend_id` (可选): 好友用户 ID，与 `account` 选填其一即可
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "好友申请已发送"
-}
-```
-
-**边界场景响应:**
-
-```json
-{
-  "code": 400,
-  "data": null,
-  "message": "不能添加自己为好友"
-}
-```
-
-```json
-{
-  "code": 400,
-  "data": null,
-  "message": "你们已经是好友了"
-}
-```
-
-```json
-{
-  "code": 400,
-  "data": null,
-  "message": "好友申请已存在"
-}
-```
-
-**使用流程:**
-
-1. 前端先调用搜索用户接口，获取用户详细信息
-2. 前端展示用户信息（名字、邮箱、账号、头像等）
-3. 用户点击"发送好友请求"按钮
-4. 前端调用发送好友请求接口，携带目标用户的邮箱或账号
+| 场景 | 响应码 | 消息 |
+|------|--------|------|
+| 添加自己 | 400 | 不能添加自己为好友 |
+| 已是好友 | 400 | 你们已经是好友了 |
+| 申请已存在 | 400 | 好友申请已存在 |
 
 ---
 
-### 14. 获取好友请求列表（需要认证）
+### 15. 获取好友请求列表
 
-```bash
-curl -X GET https://code.gelsomino.cn:8081/api/friend/requests \
-  -H "Authorization: Bearer $TOKEN"
-```
+**接口地址：** `GET /api/friend/requests`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -522,8 +624,6 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/requests \
     {
       "ID": 1,
       "CreatedAt": "2026-03-25T01:23:45Z",
-      "UpdatedAt": "2026-03-25T01:23:45Z",
-      "DeletedAt": null,
       "sender_id": 8,
       "receiver_id": 9,
       "status": 0
@@ -533,111 +633,54 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/requests \
 }
 ```
 
-**返回字段说明:**
+**状态说明：**
 
-- `ID`: 申请记录ID
-- `sender_id`: 发起申请的用户ID
-- `receiver_id`: 接收申请的用户ID
-- `status`: 申请状态 (0: 待处理, 1: 已接受, 2: 已拒绝)
-
----
-
-### 15. 处理好友申请（需要认证）
-
-```bash
-# 接受好友申请
-curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "request_id": 1,
-    "status": 1
-  }'
-
-# 拒绝好友申请
-curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "request_id": 1,
-    "status": 2
-  }'
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `request_id` (必填): 好友申请记录 ID，来自“获取好友请求列表”接口中的 `ID`
-- `status` (必填): 处理结果
-  - `1`: 接受申请
-  - `2`: 拒绝申请
-
-说明：
-
-- 只有当前登录用户作为 `receiver_id` 时，才可以处理这条好友申请
-- 前端应优先从“获取好友请求列表”接口中读取待处理申请，再调用本接口
-- 如果一条申请已经被处理过，再次调用不会重复创建好友关系
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "处理好友申请成功"
-}
-```
-
-**常见错误响应:**
-
-```json
-{
-  "code": 400,
-  "data": null,
-  "message": "无效的好友申请处理状态"
-}
-```
-
-```json
-{
-  "code": 403,
-  "data": null,
-  "message": "无权处理该好友申请"
-}
-```
-
-```json
-{
-  "code": 404,
-  "data": null,
-  "message": "好友申请不存在"
-}
-```
-
-**前端处理建议:**
-
-1. 先调用“获取好友请求列表”接口，筛出 `status = 0` 的待处理申请
-2. 用户点击“接受”时，传 `status = 1`
-3. 用户点击“拒绝”时，传 `status = 2`
-4. 处理成功后，重新拉取好友申请列表和好友列表，刷新页面状态
+| 状态值 | 含义 |
+|--------|------|
+| 0 | 待处理 |
+| 1 | 已接受 |
+| 2 | 已拒绝 |
 
 ---
 
-### 16. 获取好友列表（需要认证）
+### 16. 处理好友申请
+
+**接口地址：** `POST /api/friend/handle`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `request_id` | uint | 是 | 申请记录 ID |
+| `status` | int | 是 | 1-接受，2-拒绝 |
+
+**请求示例：**
 
 ```bash
-curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
-  -H "Authorization: Bearer $TOKEN"
+# 接受申请
+curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"request_id": 1, "status": 1}'
+
+# 拒绝申请
+curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"request_id": 1, "status": 2}'
 ```
 
-**请求头:**
+---
 
-- `Authorization`: Bearer Token
+### 17. 获取好友列表
 
-**响应示例:**
+**接口地址：** `GET /api/friend/list`
+
+**认证要求：** 是
+
+**响应示例：**
 
 ```json
 {
@@ -648,61 +691,40 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
       "user_id": 8,
       "friend_id": 9,
       "account": "9395046534",
-      "name": "未命名用户",
+      "name": "李四",
       "email": "friend@example.com",
-      "avatar": "",
-      "gender": 0,
-      "birthday": "",
-      "location": "",
-      "remark": ""
+      "avatar": "avatar_9_1776183103821.jpg",
+      "gender": 1,
+      "birthday": "2000-01-01",
+      "location": "上海",
+      "remark": "同事"
     }
   ],
   "message": "获取好友列表成功"
 }
 ```
 
-**返回字段说明:**
-
-- `id`: 好友关系记录ID
-- `user_id`: 当前用户ID
-- `friend_id`: 好友用户ID
-- `account`: 好友账号
-- `name`: 好友名字
-- `email`: 好友邮箱
-- `avatar`: 好友头像
-- `gender`: 好友性别 (0:未知, 1:男, 2:女)
-- `birthday`: 好友生日
-- `location`: 好友位置
-- `remark`: 好友备注
-
 ---
 
-### 17. 检查好友关系（需要认证）
+### 18. 检查好友关系
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/friend/check \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "friend_id": 7
-  }'
-```
+**接口地址：** `POST /api/friend/check`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
+**请求参数：**
 
-**请求参数:**
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `friend_id` | uint | 是 | 待检查的用户 ID |
 
-- `friend_id` (必填): 好友用户 ID
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
   "code": 200,
   "data": {
-    "is_friend": false
+    "is_friend": true
   },
   "message": "检查好友关系成功"
 }
@@ -710,73 +732,52 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/check \
 
 ---
 
-### 18. 删除好友（需要认证）
+### 19. 删除好友
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/friend/delete \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "friend_id": 7
-  }'
-```
+**接口地址：** `POST /api/friend/delete`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
+**请求参数：**
 
-**请求参数:**
-
-- `friend_id` (必填): 好友用户 ID
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "删除好友成功"
-}
-```
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `friend_id` | uint | 是 | 好友用户 ID |
 
 ---
 
-### 19. 修改好友备注（需要认证）
+### 20. 修改好友备注
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/friend/remark_update \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "friend_id": 9,
-    "remark": "张三"
-  }'
-```
+**接口地址：** `POST /api/friend/remark_update`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
+**请求参数：**
 
-**请求参数:**
-
-- `friend_id` (必填): 好友用户 ID
-- `remark` (可选): 新的备注名，传空字符串表示清除备注
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "修改好友备注成功"
-}
-```
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `friend_id` | uint | 是 | 好友用户 ID |
+| `remark` | string | 否 | 备注名，空字符串表示清除备注 |
 
 ---
 
-## 聊天相关 API
+## 群聊相关 API
 
-### 20. 创建群聊（需要认证）
+### 21. 创建群聊
+
+**接口地址：** `POST /api/group/create`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 群聊名称 |
+| `avatar` | string | 否 | 群头像文件名 |
+| `member_ids` | []uint | 否 | 初始成员 ID 列表（必须是好友） |
+
+**请求示例：**
 
 ```bash
 curl -X POST https://code.gelsomino.cn:8081/api/group/create \
@@ -789,17 +790,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/create \
   }'
 ```
 
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `name` (必填): 群聊名称
-- `avatar` (可选): 群头像地址
-- `member_ids` (可选): 初始拉入群聊的好友用户 ID 列表
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -819,73 +810,13 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/create \
 
 ---
 
-### 21. 拉好友进群（需要认证）
+### 22. 获取群聊列表
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/group/member/add \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "group_id": 3,
-    "member_ids": [31, 32]
-  }'
-```
+**接口地址：** `GET /api/group/list`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `group_id` (必填): 群聊 ID
-- `member_ids` (必填): 要拉入群聊的好友用户 ID 列表
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": [
-    {
-      "user_id": 28,
-      "account": "4692092926",
-      "name": "未命名用户",
-      "email": "user1@example.com",
-      "avatar": "",
-      "role": "owner"
-    },
-    {
-      "user_id": 29,
-      "account": "9385705211",
-      "name": "未命名用户",
-      "email": "user2@example.com",
-      "avatar": "",
-      "role": "member"
-    }
-  ],
-  "message": "拉群成功"
-}
-```
-
-说明：
-
-- 当前版本仅允许把自己的好友拉进群
-- 当前版本拉人进群时不会额外发送系统通知消息，如果前端需要提示，可在成功拉群后自行刷新群成员列表或补充业务通知
-
----
-
-### 22. 获取群聊列表（需要认证）
-
-```bash
-curl -X GET https://code.gelsomino.cn:8081/api/group/list \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -907,22 +838,19 @@ curl -X GET https://code.gelsomino.cn:8081/api/group/list \
 
 ---
 
-### 23. 获取群成员列表（需要认证）
+### 23. 获取群成员列表
 
-```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/group/members?group_id=3" \
-  -H "Authorization: Bearer $TOKEN"
-```
+**接口地址：** `GET /api/group/members`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
+**请求参数：**
 
-**请求参数:**
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
 
-- `group_id` (必填): 群聊 ID
-
-**响应示例:**
+**响应示例：**
 
 ```json
 {
@@ -931,17 +859,17 @@ curl -X GET "https://code.gelsomino.cn:8081/api/group/members?group_id=3" \
     {
       "user_id": 28,
       "account": "4692092926",
-      "name": "未命名用户",
+      "name": "张三",
       "email": "user1@example.com",
-      "avatar": "",
+      "avatar": "avatar_28_1776183103821.jpg",
       "role": "owner"
     },
     {
       "user_id": 29,
       "account": "9385705211",
-      "name": "未命名用户",
+      "name": "李四",
       "email": "user2@example.com",
-      "avatar": "",
+      "avatar": "avatar_29_1776183103821.jpg",
       "role": "member"
     }
   ],
@@ -949,128 +877,111 @@ curl -X GET "https://code.gelsomino.cn:8081/api/group/members?group_id=3" \
 }
 ```
 
----
+**角色说明：**
 
-### 24. 踢出群成员（需要认证）
-
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/group/member/remove \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "group_id": 3,
-    "member_id": 29
-  }'
-```
-
-**请求头:**
-
-- `Authorization`: Bearer Token
-
-**请求参数:**
-
-- `group_id` (必填): 群聊 ID
-- `member_id` (必填): 要踢出的群成员用户 ID
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "踢出群成员成功"
-}
-```
-
-说明：
-
-- 只有群主可以踢人
-- 不能踢出群主自己
+| 角色 | 说明 |
+|------|------|
+| `owner` | 群主 |
+| `member` | 普通成员 |
 
 ---
 
-### 25. 退出群聊（需要认证）
+### 24. 拉好友进群
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/group/leave \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "group_id": 3
-  }'
-```
+**接口地址：** `POST /api/group/member/add`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
+**请求参数：**
 
-**请求参数:**
-
-- `group_id` (必填): 群聊 ID
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "退出群聊成功"
-}
-```
-
-说明：
-
-- 普通群成员可以主动退出群聊
-- 群主不能直接退出群聊，当前版本需要先解散群聊
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+| `member_ids` | []uint | 是 | 要拉入的好友 ID 列表 |
 
 ---
 
-### 26. 删除群聊（需要认证）
+### 25. 踢出群成员
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/group/delete \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "group_id": 3
-  }'
-```
+**接口地址：** `POST /api/group/member/remove`
 
-**请求头:**
+**认证要求：** 是
 
-- `Authorization`: Bearer Token
+**请求参数：**
 
-**请求参数:**
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+| `member_id` | uint | 是 | 要踢出的成员 ID |
 
-- `group_id` (必填): 群聊 ID
-
-**响应示例:**
-
-```json
-{
-  "code": 200,
-  "data": null,
-  "message": "删除群聊成功"
-}
-```
-
-说明：
-
-- 只有群主可以删除群聊
+**说明：** 只有群主可以踢人
 
 ---
 
-## WebSocket 聊天
+### 26. 退出群聊
 
-### 27. 建立聊天连接
+**接口地址：** `POST /api/group/leave`
 
-**注意**: WebSocket 连接使用 `ws://` 或 `wss://` 协议
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+
+**说明：** 群主不能直接退出，需要先解散群聊
+
+---
+
+### 27. 删除群聊（解散）
+
+**接口地址：** `POST /api/group/delete`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+
+**说明：** 只有群主可以解散群聊
+
+---
+
+## WebSocket 实时聊天
+
+### 28. 建立 WebSocket 连接
+
+**连接地址：** `wss://code.gelsomino.cn:8081/ws/chat?token=<token>`
+
+**认证方式：** 通过 URL 参数传递 token
+
+**JavaScript 连接示例：**
 
 ```javascript
-const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token")
+const ws = new WebSocket('wss://code.gelsomino.cn:8081/ws/chat?token=your_token');
+
+ws.onopen = () => {
+  console.log('WebSocket 连接成功');
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('收到消息:', data);
+};
+
+ws.onclose = () => {
+  console.log('WebSocket 连接关闭');
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket 错误:', error);
+};
 ```
 
-连接成功后，服务端会先返回：
+**连接成功响应：**
 
 ```json
 {
@@ -1079,9 +990,11 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-### 28. 发送聊天消息
+---
 
-客户端发送文本消息：
+### 29. 发送单聊消息
+
+**客户端发送：**
 
 ```json
 {
@@ -1092,18 +1005,31 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-客户端发送图片消息：
+**发送图片消息：**
 
 ```json
 {
   "type": "chat",
   "to_user_id": 9,
   "message_type": "image",
-  "content": "https://sleet.853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/test.jpg"
+  "content": "https://cdn.gelsomino.cn/chat/chat_8_1776183103821_0.jpg"
 }
 ```
 
-客户端发送群文本消息：
+**字段说明：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `type` | string | 是 | 固定值 `chat` |
+| `to_user_id` | uint | 是 | 接收方用户 ID |
+| `message_type` | string | 是 | `text` 或 `image` |
+| `content` | string | 是 | 消息内容 |
+
+---
+
+### 30. 发送群聊消息
+
+**客户端发送：**
 
 ```json
 {
@@ -1114,85 +1040,84 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-客户端发送群图片消息：
+**字段说明：**
 
-```json
-{
-  "type": "chat",
-  "group_id": 3,
-  "message_type": "image",
-  "content": "https://853c9e9e83f1baa03bf8f17686060e5c.r2.cloudflarestorage.com/sleet/sleet/chat/32/1775157055_test.png"
-}
-```
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `type` | string | 是 | 固定值 `chat` |
+| `group_id` | uint | 是 | 群聊 ID（与 to_user_id 二选一） |
+| `message_type` | string | 是 | `text` 或 `image` |
+| `content` | string | 是 | 消息内容 |
 
-说明：
+---
 
-- 单聊时传 `to_user_id`
-- 群聊时传 `group_id`
-- 图片消息建议先调用“上传聊天图片”接口，再把返回的 `content` 作为消息内容发送
+### 31. 消息回执
 
-发送成功后，发送方会收到：
+**发送成功回执（发送方收到）：**
 
 ```json
 {
   "type": "sent",
   "message": {
-    "id": "1775157054611820070-10",
-    "conversation_type": "group",
+    "id": "1775157054611820070-8",
+    "conversation_type": "single",
     "from_user_id": 8,
-    "to_user_id": 0,
-    "group_id": 3,
+    "to_user_id": 9,
+    "group_id": 0,
     "message_type": "text",
-    "content": "大家好",
+    "content": "你好",
     "created_at": "2026-04-03T03:10:54+08:00"
   }
 }
 ```
 
-接收方会收到：
+**消息投递（接收方收到）：**
 
 ```json
 {
   "type": "chat",
   "message": {
-    "id": "1775157054611820070-10",
-    "conversation_type": "group",
+    "id": "1775157054611820070-8",
+    "conversation_type": "single",
     "from_user_id": 8,
-    "to_user_id": 0,
-    "group_id": 3,
+    "to_user_id": 9,
+    "group_id": 0,
     "message_type": "text",
-    "content": "大家好",
+    "content": "你好",
     "created_at": "2026-04-03T03:10:54+08:00"
   },
   "offline": false
 }
 ```
 
-### 29. 离线消息
-
-- 如果接收方不在线，服务端会把消息暂存在内存里
-- 接收方下次建立 WebSocket 连接后，服务端会立即投递这些消息
-- 服务端成功投递后，就会从内存中删除对应离线消息
-
-离线消息投递时格式如下：
+**离线消息：**
 
 ```json
 {
   "type": "chat",
   "message": {
     "id": "1741170000000-1",
-    "conversation_type": "group",
+    "conversation_type": "single",
     "from_user_id": 8,
-    "to_user_id": 0,
-    "group_id": 3,
-    "content": "我离线给你发了一条消息",
+    "to_user_id": 9,
+    "group_id": 0,
+    "message_type": "text",
+    "content": "离线消息",
     "created_at": "2026-03-25T01:23:45Z"
   },
   "offline": true
 }
 ```
 
-### 30. 错误消息
+**字段说明：**
+
+| 字段 | 说明 |
+|------|------|
+| `offline` | `true` 表示这是离线消息，`false` 表示实时消息 |
+
+---
+
+### 32. WebSocket 错误消息
 
 ```json
 {
@@ -1201,164 +1126,480 @@ const ws = new WebSocket("wss://code.gelsomino.cn:8081/ws/chat?token=你的token
 }
 ```
 
-常见错误：
+**常见错误：**
 
-- `缺少认证信息`
-- `无效的token`
-- `不支持的消息类型`
-- `接收方或群聊不能为空`
-- `消息内容不能为空`
-- `只能给好友发送消息`
-- `你不在该群聊中`
+| 错误信息 | 说明 |
+|----------|------|
+| `缺少认证信息` | Token 无效或缺失 |
+| `无效的token` | Token 格式错误或已过期 |
+| `不支持的消息类型` | message_type 不是 text 或 image |
+| `接收方或群聊不能为空` | 缺少 to_user_id 或 group_id |
+| `消息内容不能为空` | content 为空 |
+| `只能给好友发送消息` | 尝试给非好友发送消息 |
+| `你不在该群聊中` | 尝试给未加入的群发送消息 |
 
 ---
 
-## 测试流程
+### 33. WebSocket 心跳机制
 
-### 快速测试步骤：
+**后端机制：**
+- 服务端每 5 秒发送一次 Ping 帧
+- 客户端需在 3 秒内响应 Pong 帧
+- 超时未响应将断开连接
 
-1. **注册用户**
+**前端建议：**
+1. 标准 WebSocket API 会自动响应 Ping/Pong
+2. 实现断线重连机制（指数退避：1s → 2s → 4s → 8s）
+3. Token 失效时触发刷新流程后再重连
+
+---
+
+## E2EE 端到端加密 API
+
+### 概述
+
+系统支持端到端加密（End-to-End Encryption），使用 X25519 + ChaCha20-Poly1305 算法。
+
+### 34. 发布用户公钥
+
+**接口地址：** `POST /api/e2ee/keys/publish`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `key_type` | string | 是 | 密钥类型，如 `x25519` |
+| `public_key` | string | 是 | Base64 编码的公钥 |
+
+**请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/register -H "Content-Type: application/json" -d '{"email": "sleet0528@outlook.com", "password": "Zyz20050922!"}'
-```
-
-2. **登录获取 token**
-
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/login -H "Content-Type: application/json" -d '{"account": "sleet0528@outlook.com", "password": "Zyz20050922!"}'
-```
-
-3. **设置 token 变量**
-
-```bash
-export TOKEN="你的token"
-```
-
-4. **测试其他 API**
-
-```bash
-# 获取用户信息
-curl -X POST https://code.gelsomino.cn:8081/api/user/self -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN"
-
-# 搜索用户（通过邮箱或账号，不需要认证）
-curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=sleet0528@outlook"
-
-# 测试 OSS API
-curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=test.jpg"
-
-# 上传聊天图片
-curl -X POST https://code.gelsomino.cn:8081/api/chat/upload/image \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "file=@./test.png"
-
-# 测试好友 API（通过邮箱或账号）
-curl -X POST https://code.gelsomino.cn:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account": "sleet0528@outlook"}'
-
-# 获取好友列表（返回好友详细信息）
-curl -X GET https://code.gelsomino.cn:8081/api/friend/list -H "Authorization: Bearer $TOKEN"
-
-# 创建群聊
-curl -X POST https://code.gelsomino.cn:8081/api/group/create \
+curl -X POST https://code.gelsomino.cn:8081/api/e2ee/keys/publish \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"name":"项目组","member_ids":[2,3]}'
+  -d '{
+    "key_type": "x25519",
+    "public_key": "base64_encoded_public_key"
+  }'
 ```
 
-### 完整的好友添加流程：
+**响应示例：**
 
-1. **搜索用户**（不需要认证）
+```json
+{
+  "code": 200,
+  "data": {
+    "user_id": 8,
+    "key_type": "x25519",
+    "updated_at": "2026-04-03T03:10:54Z"
+  },
+  "message": "ok"
+}
+```
+
+---
+
+### 35. 获取用户公钥
+
+**接口地址：** `GET /api/e2ee/keys/public`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_id` | uint | 是 | 目标用户 ID |
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "user_id": 9,
+    "key_type": "x25519",
+    "public_key": "base64_encoded_public_key",
+    "updated_at": "2026-04-03T03:10:54Z"
+  },
+  "message": "ok"
+}
+```
+
+---
+
+### 36. 获取群聊当前密钥
+
+**接口地址：** `GET /api/e2ee/group/key/current`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+
+**响应示例（成功）：**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "group_id": 3,
+    "key_version": 1,
+    "wrapped_group_key": "base64_encoded_key",
+    "wrap_nonce": "base64_encoded_nonce",
+    "wrapped_by_user_id": 8,
+    "key_wrap_alg": "x25519+aes256gcm"
+  },
+  "message": "ok"
+}
+```
+
+**响应示例（需要上传密钥）：**
+
+```json
+{
+  "code": 428,
+  "message": "e2ee group key box not found, please upload key boxes",
+  "data": {
+    "group_id": 3,
+    "key_version": 1,
+    "need_publish": true
+  }
+}
+```
+
+---
+
+### 37. 发布群聊密钥盒子
+
+**接口地址：** `POST /api/e2ee/group/key/publish`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+| `key_version` | int | 是 | 密钥版本 |
+| `key_wrap_alg` | string | 否 | 密钥包装算法 |
+| `boxes` | array | 是 | 密钥盒子数组 |
+
+**boxes 数组元素：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `user_id` | uint | 目标用户 ID |
+| `wrapped_group_key` | string | 加密的群密钥 |
+| `wrap_nonce` | string | 加密 nonce |
+
+**请求示例：**
 
 ```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=目标用户邮箱"
+curl -X POST https://code.gelsomino.cn:8081/api/e2ee/group/key/publish \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "group_id": 3,
+    "key_version": 1,
+    "key_wrap_alg": "x25519+aes256gcm",
+    "boxes": [
+      {
+        "user_id": 9,
+        "wrapped_group_key": "base64_encoded_key",
+        "wrap_nonce": "base64_encoded_nonce"
+      }
+    ]
+  }'
 ```
 
-返回目标用户的详细信息（名字、邮箱、账号、头像、生日等）
+---
 
-2. **发送好友请求**（需要认证）
+### 38. 获取指定版本群密钥
+
+**接口地址：** `GET /api/e2ee/group/key/by-version`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `group_id` | uint | 是 | 群聊 ID |
+| `key_version` | int | 是 | 密钥版本 |
+
+---
+
+## RTC 实时通话 API
+
+### 概述
+
+系统支持音视频实时通话，基于 WebRTC 技术。
+
+### 通话类型
+
+| 类型 | 说明 |
+|------|------|
+| `audio` | 语音通话 |
+| `video` | 视频通话 |
+
+### 39. 发起通话邀请
+
+**接口地址：** `POST /api/rtc/call/invite`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `peer_id` | uint | 可选 | 被叫用户 ID（单聊） |
+| `group_id` | uint | 可选 | 群聊 ID（群通话） |
+| `call_type` | string | 是 | `audio` 或 `video` |
+
+**请求示例（单聊）：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/friend/request -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"account":"目标用户邮箱"}'
+curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "peer_id": 9,
+    "call_type": "video"
+  }'
 ```
 
-3. **目标用户获取待处理申请列表**（需要认证）
+**请求示例（群聊）：**
 
 ```bash
-curl -X GET https://code.gelsomino.cn:8081/api/friend/requests -H "Authorization: Bearer $TOKEN"
+curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "group_id": 3,
+    "call_type": "audio"
+  }'
 ```
 
-从返回结果中拿到申请记录的 `ID`
+---
 
-4. **目标用户处理好友申请**（需要认证）
+### 40. 接受通话
 
-```bash
-curl -X POST https://code.gelsomino.cn:8081/api/friend/handle -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d '{"request_id":1,"status":1}'
+**接口地址：** `POST /api/rtc/call/accept`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `call_id` | string | 是 | 通话 ID |
+
+---
+
+### 41. 拒绝通话
+
+**接口地址：** `POST /api/rtc/call/reject`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `call_id` | string | 是 | 通话 ID |
+| `reason` | string | 否 | 拒绝原因 |
+
+---
+
+### 42. 取消通话
+
+**接口地址：** `POST /api/rtc/call/cancel`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `call_id` | string | 是 | 通话 ID |
+
+**说明：** 主叫方在对方接听前取消通话
+
+---
+
+### 43. 挂断通话
+
+**接口地址：** `POST /api/rtc/call/hangup`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `call_id` | string | 是 | 通话 ID |
+
+**说明：** 通话中任意一方挂断
+
+---
+
+### 44. 获取 RTC Token
+
+**接口地址：** `POST /api/rtc/token`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `call_id` | string | 是 | 通话 ID |
+| `room_id` | string | 否 | 房间 ID |
+| `call_type` | string | 是 | `audio` 或 `video` |
+| `peer_id` | uint | 否 | 对端用户 ID |
+| `group_id` | uint | 否 | 群聊 ID |
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "token": "rtc_token_string",
+    "room_id": "room_123",
+    "expires_in": 3600
+  },
+  "message": "获取 RTC Token 成功"
+}
 ```
-
-处理成功后，双方即可在好友列表中看到彼此
-
-### 注意事项：
-
-- 确保服务运行在 `code.gelsomino.cn:8081`
-- 注册时账号由系统自动生成 10 位随机数字
-- 邮箱用于登录，账号用于搜索好友
-- 搜索用户接口不需要认证，可以公开调用
-- 加好友时如果目标用户是自己，会返回 `不能添加自己为好友`
-- 加好友时如果双方已经是好友，会返回 `你们已经是好友了`
-- 加好友时如果存在未处理的申请（任一方向），会返回 `好友申请已存在`
-- 处理好友申请时，只有申请接收者本人可以操作；其他用户会收到 `无权处理该好友申请`
-- 需要先注册并登录获取 token 才能测试需要认证的 API
-- 好友功能需要至少注册两个用户进行测试
-- 好友列表接口返回好友的详细信息（名字、账号、邮箱、头像等）
-- 群聊相关接口需要先建立好友关系，当前版本只支持拉好友进群
-- 删除群聊仅允许群主操作
 
 ---
 
 ## 附录
 
-### 附录 A: 全局错误码对照表
-前端需要根据响应的 `code` 字段进行全局拦截或提示。
+### 附录 A：完整错误码表
 
-| HTTP 状态码 | 业务错误码 (code) | 说明 | 前端建议处理方式 |
-| :--- | :--- | :--- | :--- |
-| 200 | 200 | 成功 | 继续执行业务逻辑 |
-| 400 | 400 | 请求参数错误 | 提示用户检查输入表单 |
-| 401 | 401 | 未授权 | 跳转到登录页 |
-| 403 | 403 | 禁止访问 | 提示无权限 |
-| 404 | 404 | 资源不存在 | 提示资源找不到 |
-| 500 | 500 | 服务器内部错误 | 提示系统繁忙，稍后重试 |
-| 200/400 | 10001 | 用户已存在 | 注册时提示账号已占用 |
-| 200/404 | 10002 | 用户不存在 | 登录/搜索时提示无此用户 |
-| 200/400 | 10003 | 密码错误 | 登录时提示密码错误 |
-| 200/500 | 10004 | Token生成失败 | 提示登录失败，请重试 |
-| 200/401 | 10005 | Token解析失败 | 强制登出，重新登录 |
-| 200/401 | 10006 | Token已过期 | 尝试无感刷新 Token 或重新登录 |
-| 200/400 | 20001 | 好友已存在 | 提示已经是好友 |
-| 200/404 | 20002 | 好友不存在 | 提示非好友关系 |
-| 200/400 | 20003 | 好友请求处理失败 | 提示操作失败，请重试 |
-| 200/500 | 30001 | 文件上传失败 | 提示上传失败，请重试 |
-| 200/500 | 30002 | 文件下载失败 | 提示下载失败，请重试 |
+#### HTTP 状态码
 
-### 附录 B: 通用字段类型及约束规范
-表单提交和数据渲染时，请遵守以下字段规范：
+| 状态码 | 含义 |
+|--------|------|
+| 200 | 请求成功 |
+| 400 | 请求参数错误 |
+| 401 | 未授权，Token 无效或过期 |
+| 403 | 禁止访问，权限不足 |
+| 404 | 资源不存在 |
+| 409 | 资源冲突 |
+| 428 | 需要上传密钥（E2EE） |
+| 500 | 服务器内部错误 |
 
-| 字段名 | 类型 | 说明及约束 |
-| :--- | :--- | :--- |
-| `gender` | `int` | 性别枚举：`0` 未知/保密，`1` 男，`2` 女 |
-| `birthday` | `string` | 格式必须为 `YYYY-MM-DD`（如：`2000-01-01`） |
-| `password` | `string` | 注册/修改时，建议前端增加长度和复杂度限制（如 6-20 位，包含字母数字） |
-| `message_type` | `string` | 聊天消息类型枚举：`text` (文本), `image` (图片) |
-| `conversation_type` | `string` | 会话类型枚举：`single` (单聊), `group` (群聊) |
+#### 业务错误码
 
-### 附录 C: WebSocket 心跳保活机制 💓
-为了防止 WebSocket 长连接被网关（如 Nginx、云服务商防火墙）自动掐断，**前端必须实现心跳机制**。
+| 错误码 | 说明 | 建议处理 |
+|--------|------|----------|
+| 10001 | 用户已存在 | 提示用户直接登录 |
+| 10002 | 用户不存在 | 提示用户先注册 |
+| 10003 | 密码错误 | 提示重新输入密码 |
+| 10004 | Token 生成失败 | 提示稍后重试 |
+| 10005 | Token 解析失败 | 重新登录 |
+| 10006 | Token 已过期 | 调用刷新接口或重新登录 |
+| 20001 | 好友已存在 | 无需处理 |
+| 20002 | 好友不存在 | 提示先添加好友 |
+| 20003 | 好友请求处理失败 | 提示稍后重试 |
+| 30001 | 文件上传失败 | 提示重新上传 |
+| 30002 | 文件下载失败 | 提示稍后重试 |
 
-**后端机制：**
-- 服务端会每隔 **5 秒** 向客户端发送一次 Ping 帧。
-- 客户端如果在 **3 秒** 内没有响应 Pong 帧，服务端将主动断开连接。
+### 附录 B：数据类型规范
 
-**前端开发建议（心跳与重连）：**
-1. **自动响应**：标准的浏览器 WebSocket API (如 JS 的 `WebSocket` 对象) 底层会自动响应服务端的 Ping 帧（回复 Pong 帧），通常不需要前端手动写代码回 Ping。
-2. **断线重连**：网络波动会导致连接意外断开，前端必须监听 `onclose` 和 `onerror` 事件，并实现**指数退避重连机制**（如 1s -> 2s -> 4s -> 8s 尝试重连）。
-3. **Token 失效处理**：如果连接因为 `401 Unauthorized` 被拒绝，应触发 Token 刷新流程后再重新建立 WS 连接。
+| 字段 | 类型 | 格式/约束 |
+|------|------|-----------|
+| `gender` | int | 0-未知，1-男，2-女 |
+| `birthday` | string | YYYY-MM-DD |
+| `message_type` | string | `text`, `image` |
+| `conversation_type` | string | `single`, `group` |
+| `call_type` | string | `audio`, `video` |
+| `created_at` | string | RFC3339 格式 |
+
+### 附录 C：头像处理指南
+
+#### 头像上传流程
+
+```
+1. 调用 GET /api/oss/upload-url?key=avatar_{user_id}_{timestamp}.jpg&type=avatar
+2. 使用返回的 upload_url 上传图片（PUT 请求）
+3. 调用 POST /api/user/avatar_update 更新头像字段
+```
+
+#### 头像显示流程
+
+```
+1. 检查 avatar 字段是否为完整 URL
+   - 是：直接使用
+   - 否：调用 GET /api/oss/download-url?key={avatar} 获取下载链接
+2. 使用下载链接显示头像
+```
+
+### 附录 D：测试流程
+
+#### 完整测试步骤
+
+```bash
+# 1. 注册用户
+export REGISTER_RESULT=$(curl -s -X POST https://code.gelsomino.cn:8081/api/user/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test1@example.com", "password": "password123"}')
+
+# 2. 登录获取 token
+export LOGIN_RESULT=$(curl -s -X POST https://code.gelsomino.cn:8081/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"account": "test1@example.com", "password": "password123"}')
+
+export TOKEN=$(echo $LOGIN_RESULT | jq -r '.data.token')
+
+# 3. 获取用户信息
+curl -X POST https://code.gelsomino.cn:8081/api/user/self \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. 搜索用户
+curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=test2@example.com"
+
+# 5. 添加好友
+curl -X POST https://code.gelsomino.cn:8081/api/friend/request \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"account": "test2@example.com"}'
+
+# 6. 获取好友列表
+curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 附录 E：WebSocket 消息格式汇总
+
+#### 客户端发送消息
+
+| 类型 | 格式 | 说明 |
+|------|------|------|
+| 单聊文本 | `{"type":"chat","to_user_id":9,"message_type":"text","content":"内容"}` | 发送文本消息 |
+| 单聊图片 | `{"type":"chat","to_user_id":9,"message_type":"image","content":"url"}` | 发送图片消息 |
+| 群聊文本 | `{"type":"chat","group_id":3,"message_type":"text","content":"内容"}` | 发送群消息 |
+| 群聊图片 | `{"type":"chat","group_id":3,"message_type":"image","content":"url"}` | 发送群图片 |
+
+#### 服务端推送消息
+
+| 类型 | 格式 | 说明 |
+|------|------|------|
+| 连接成功 | `{"type":"connected","user_id":8}` | WebSocket 连接建立 |
+| 发送回执 | `{"type":"sent","message":{}}` | 消息发送成功 |
+| 收到消息 | `{"type":"chat","message":{},"offline":false}` | 收到新消息 |
+| 离线消息 | `{"type":"chat","message":{},"offline":true}` | 离线期间的消息 |
+| 错误 | `{"type":"error","error":"错误信息"}` | 发生错误 |
+
+---
+
+**文档结束**
