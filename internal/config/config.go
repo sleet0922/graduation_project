@@ -16,10 +16,8 @@ type DatabaseConfig struct {
 }
 
 type GinPortConfig struct {
-	Port     string `json:"port" mapstructure:"port"`
-	Mode     string `json:"mode" mapstructure:"mode"`
-	CertFile string `json:"cert_file" mapstructure:"cert_file"`
-	KeyFile  string `json:"key_file" mapstructure:"key_file"`
+	Port string `json:"port" mapstructure:"port"`
+	Mode string `json:"mode" mapstructure:"mode"`
 }
 
 type OSSConfig struct {

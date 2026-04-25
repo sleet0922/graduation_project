@@ -1,8 +1,6 @@
 server:
   port: ":8081"
   mode: "release"
-  cert_file: "/ssl/1.pem"
-  key_file: "/ssl/1.key"
 
 database:
   username: "postgres"

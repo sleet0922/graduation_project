@@ -42,6 +42,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	friendHandler := handler.NewFriendHandler(friendService, userService, jwtManager)
 	groupHandler := handler.NewGroupHandler(groupService, chatService)
 	chatHandler := handler.NewChatHandler(chatService, jwtManager)
+	onlineHandler := handler.NewOnlineHandler(chatService)
 	rtcHandler := handler.NewRTCHandler(rtcService)
 	e2eeHandler := handler.NewE2EEHandler(e2eeService)
 
@@ -51,6 +52,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.GET("/api/oss/upload-url", jwtMiddleware.Auth(), ossHandler.GetUploadURL)
 	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
 	r.GET("/ws/chat", jwtMiddleware.Auth(), chatHandler.Connect)
+	r.GET("/ws/online", jwtMiddleware.Auth(), onlineHandler.Connect)
 	r.POST("/api/chat/upload/image", jwtMiddleware.Auth(), ossHandler.UploadChatImage)
 	r.POST("/api/user/avatar_update", jwtMiddleware.Auth(), userHandler.UpdateAvatar)
 	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)

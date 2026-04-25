@@ -26,17 +26,7 @@ func main() {
 	r := router.InitRouter(database, cfg)
 
 	logger.Info("服务器启动", slog.String("port", cfg.Server.Port))
-	var err error
-	if cfg.Server.Mode == "release" {
-		err = r.RunTLS(
-			cfg.Server.Port,
-			cfg.Server.CertFile, // 证书
-			cfg.Server.KeyFile,  // 私钥
-		)
-	} else {
-		err = r.Run(cfg.Server.Port)
-	}
-
+	err := r.Run(cfg.Server.Port)
 	if err != nil {
 		logger.Fatal("启动服务器失败", slog.Any("error", err))
 	}

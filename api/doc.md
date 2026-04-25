@@ -1,8 +1,8 @@
 # ZAT 即时通讯系统 API 文档
 
 > 版本: v1.0  
-> 基础地址: `https://code.gelsomino.cn:8081`  
-> 文档更新时间: 2026-04-22
+> 基础地址: `https://api.gelsomino.cn:444`  
+> 文档更新时间: 2026-04-24
 
 ---
 
@@ -15,9 +15,10 @@
 5. [好友相关 API](#好友相关-api)
 6. [群聊相关 API](#群聊相关-api)
 7. [WebSocket 实时聊天](#websocket-实时聊天)
-8. [E2EE 端到端加密 API](#e2ee-端到端加密-api)
-9. [RTC 实时通话 API](#rtc-实时通话-api)
-10. [附录](#附录)
+8. [WebSocket 在线状态](#websocket-在线状态)
+9. [E2EE 端到端加密 API](#e2ee-端到端加密-api)
+10. [RTC 实时通话 API](#rtc-实时通话-api)
+11. [附录](#附录)
 
 ---
 
@@ -107,7 +108,7 @@ Authorization: Bearer <token>
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/register \
+curl -X POST https://api.gelsomino.cn:444/api/user/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
@@ -152,7 +153,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/register \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/login \
+curl -X POST https://api.gelsomino.cn:444/api/user/login \
   -H "Content-Type: application/json" \
   -d '{
     "account": "user@example.com",
@@ -215,7 +216,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/login \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/refresh \
+curl -X POST https://api.gelsomino.cn:444/api/user/refresh \
   -H "Content-Type: application/json" \
   -d '{
     "refresh_token": "your_refresh_token"
@@ -248,7 +249,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/refresh \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/self \
+curl -X POST https://api.gelsomino.cn:444/api/user/self \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN"
 ```
@@ -290,7 +291,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/self \
 **请求示例：**
 
 ```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=user@example.com"
+curl -X GET "https://api.gelsomino.cn:444/api/user/search?keyword=user@example.com"
 ```
 
 **响应示例：**
@@ -329,7 +330,7 @@ curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=user@example
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/name_update \
+curl -X POST https://api.gelsomino.cn:444/api/user/name_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name": "张三"}'
@@ -352,7 +353,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/name_update \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/avatar_update \
+curl -X POST https://api.gelsomino.cn:444/api/user/avatar_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"avatar": "avatar_6_1776183103821.jpg"}'
@@ -380,7 +381,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/avatar_update \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/password_update \
+curl -X POST https://api.gelsomino.cn:444/api/user/password_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -408,7 +409,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/password_update \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/profile_update \
+curl -X POST https://api.gelsomino.cn:444/api/user/profile_update \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -429,7 +430,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/profile_update \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/user/delete \
+curl -X POST https://api.gelsomino.cn:444/api/user/delete \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -461,11 +462,11 @@ curl -X POST https://code.gelsomino.cn:8081/api/user/delete \
 
 ```bash
 # 上传头像
-curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=avatar_6_1776183103821.jpg&type=avatar" \
+curl -X GET "https://api.gelsomino.cn:444/api/oss/upload-url?key=avatar_6_1776183103821.jpg&type=avatar" \
   -H "Authorization: Bearer $TOKEN"
 
 # 上传聊天图片
-curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=chat_6_1776183103821_0.jpg&type=chat" \
+curl -X GET "https://api.gelsomino.cn:444/api/oss/upload-url?key=chat_6_1776183103821_0.jpg&type=chat" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -516,7 +517,7 @@ curl -X GET "https://code.gelsomino.cn:8081/api/oss/upload-url?key=chat_6_177618
 **请求示例：**
 
 ```bash
-curl -X GET "https://code.gelsomino.cn:8081/api/oss/download-url?key=avatar_6_1776183103821.jpg"
+curl -X GET "https://api.gelsomino.cn:444/api/oss/download-url?key=avatar_6_1776183103821.jpg"
 ```
 
 **响应示例：**
@@ -553,7 +554,7 @@ curl -X GET "https://code.gelsomino.cn:8081/api/oss/download-url?key=avatar_6_17
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/chat/upload/image \
+curl -X POST https://api.gelsomino.cn:444/api/chat/upload/image \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@./test.png"
 ```
@@ -593,7 +594,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/chat/upload/image \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/friend/request \
+curl -X POST https://api.gelsomino.cn:444/api/friend/request \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"account": "user@example.com"}'
@@ -660,13 +661,13 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/request \
 
 ```bash
 # 接受申请
-curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
+curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"request_id": 1, "status": 1}'
 
 # 拒绝申请
-curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
+curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"request_id": 1, "status": 2}'
@@ -780,7 +781,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/friend/handle \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/group/create \
+curl -X POST https://api.gelsomino.cn:444/api/group/create \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -954,14 +955,14 @@ curl -X POST https://code.gelsomino.cn:8081/api/group/create \
 
 ### 28. 建立 WebSocket 连接
 
-**连接地址：** `wss://code.gelsomino.cn:8081/ws/chat?token=<token>`
+**连接地址：** `wss://api.gelsomino.cn:444/ws/chat?token=<token>`
 
 **认证方式：** 通过 URL 参数传递 token
 
 **JavaScript 连接示例：**
 
 ```javascript
-const ws = new WebSocket('wss://code.gelsomino.cn:8081/ws/chat?token=your_token');
+const ws = new WebSocket('wss://api.gelsomino.cn:444/ws/chat?token=your_token');
 
 ws.onopen = () => {
   console.log('WebSocket 连接成功');
@@ -1154,13 +1155,137 @@ ws.onerror = (error) => {
 
 ---
 
+## WebSocket 在线状态
+
+### 34. 建立在线状态 WebSocket 连接
+
+**连接地址：** `wss://api.gelsomino.cn:444/ws/online?token=<token>`
+
+**认证方式：** 通过 URL 参数传递 Access Token
+
+**用途：** 前端用于查询指定用户当前是否在线。在线状态基于用户是否存在有效聊天 WebSocket 连接判断。
+
+**JavaScript 连接示例：**
+
+```javascript
+const onlineWs = new WebSocket('wss://api.gelsomino.cn:444/ws/online?token=your_token');
+
+onlineWs.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('在线状态消息:', data);
+};
+```
+
+**连接成功响应：**
+
+```json
+{
+  "type": "connected",
+  "user_id": 8
+}
+```
+
+---
+
+### 35. 查询用户在线状态
+
+**查询单个用户：**
+
+```json
+{
+  "type": "check_online",
+  "user_id": 9
+}
+```
+
+**查询多个用户：**
+
+```json
+{
+  "type": "check_online",
+  "user_ids": [9, 10, 11]
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `type` | string | 是 | 固定值 `check_online` |
+| `user_id` | uint | 否 | 单个待查询用户 ID |
+| `user_ids` | []uint | 否 | 多个待查询用户 ID |
+
+**单个用户响应：**
+
+```json
+{
+  "type": "online_status",
+  "user_id": 9,
+  "online": true
+}
+```
+
+**多个用户响应：**
+
+```json
+{
+  "type": "online_status",
+  "statuses": [
+    {
+      "user_id": 9,
+      "online": true
+    },
+    {
+      "user_id": 10,
+      "online": false
+    }
+  ]
+}
+```
+
+---
+
+### 36. 在线状态心跳与错误
+
+**客户端心跳：**
+
+```json
+{
+  "type": "ping"
+}
+```
+
+**服务端响应：**
+
+```json
+{
+  "type": "pong"
+}
+```
+
+**错误响应：**
+
+```json
+{
+  "type": "error",
+  "error": "用户ID不能为空"
+}
+```
+
+**说明：**
+- 服务端每 5 秒发送一次 WebSocket Ping 帧
+- 客户端需在 3 秒内响应 Pong 帧
+- 查询消息中 `user_id` 和 `user_ids` 至少传一个
+
+---
+
 ## E2EE 端到端加密 API
 
 ### 概述
 
 系统支持端到端加密（End-to-End Encryption），使用 X25519 + ChaCha20-Poly1305 算法。
 
-### 34. 发布用户公钥
+### 37. 发布用户公钥
 
 **接口地址：** `POST /api/e2ee/keys/publish`
 
@@ -1176,7 +1301,7 @@ ws.onerror = (error) => {
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/e2ee/keys/publish \
+curl -X POST https://api.gelsomino.cn:444/api/e2ee/keys/publish \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -1201,7 +1326,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/keys/publish \
 
 ---
 
-### 35. 获取用户公钥
+### 38. 获取用户公钥
 
 **接口地址：** `GET /api/e2ee/keys/public`
 
@@ -1230,7 +1355,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/keys/publish \
 
 ---
 
-### 36. 获取群聊当前密钥
+### 39. 获取群聊当前密钥
 
 **接口地址：** `GET /api/e2ee/group/key/current`
 
@@ -1275,7 +1400,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/keys/publish \
 
 ---
 
-### 37. 发布群聊密钥盒子
+### 40. 发布群聊密钥盒子
 
 **接口地址：** `POST /api/e2ee/group/key/publish`
 
@@ -1301,7 +1426,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/keys/publish \
 **请求示例：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/e2ee/group/key/publish \
+curl -X POST https://api.gelsomino.cn:444/api/e2ee/group/key/publish \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -1320,7 +1445,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/group/key/publish \
 
 ---
 
-### 38. 获取指定版本群密钥
+### 41. 获取指定版本群密钥
 
 **接口地址：** `GET /api/e2ee/group/key/by-version`
 
@@ -1348,7 +1473,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/group/key/publish \
 | `audio` | 语音通话 |
 | `video` | 视频通话 |
 
-### 39. 发起通话邀请
+### 42. 发起通话邀请
 
 **接口地址：** `POST /api/rtc/call/invite`
 
@@ -1365,7 +1490,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/e2ee/group/key/publish \
 **请求示例（单聊）：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
+curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -1377,7 +1502,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 **请求示例（群聊）：**
 
 ```bash
-curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
+curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -1386,9 +1511,25 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
   }'
 ```
 
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "call_id": "call_1776183103821_8_9",
+    "room_id": "room_call_1776183103821_8_9",
+    "call_type": "video",
+    "peer_id": 9,
+    "group_id": 0
+  },
+  "message": "发起呼叫成功"
+}
+```
+
 ---
 
-### 40. 接受通话
+### 43. 接受通话
 
 **接口地址：** `POST /api/rtc/call/accept`
 
@@ -1400,9 +1541,22 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 |------|------|------|------|
 | `call_id` | string | 是 | 通话 ID |
 
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "call_id": "call_1776183103821_8_9",
+    "room_id": "room_call_1776183103821_8_9"
+  },
+  "message": "接听成功"
+}
+```
+
 ---
 
-### 41. 拒绝通话
+### 44. 拒绝通话
 
 **接口地址：** `POST /api/rtc/call/reject`
 
@@ -1417,7 +1571,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 
 ---
 
-### 42. 取消通话
+### 45. 取消通话
 
 **接口地址：** `POST /api/rtc/call/cancel`
 
@@ -1433,7 +1587,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 
 ---
 
-### 43. 挂断通话
+### 46. 挂断通话
 
 **接口地址：** `POST /api/rtc/call/hangup`
 
@@ -1449,7 +1603,7 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 
 ---
 
-### 44. 获取 RTC Token
+### 47. 获取 RTC Token
 
 **接口地址：** `POST /api/rtc/token`
 
@@ -1471,9 +1625,10 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 {
   "code": 200,
   "data": {
-    "token": "rtc_token_string",
+    "app_id": "agora_app_id",
     "room_id": "room_123",
-    "expires_in": 3600
+    "uid": "8",
+    "token": "rtc_token_string"
   },
   "message": "获取 RTC Token 成功"
 }
@@ -1550,32 +1705,32 @@ curl -X POST https://code.gelsomino.cn:8081/api/rtc/call/invite \
 
 ```bash
 # 1. 注册用户
-export REGISTER_RESULT=$(curl -s -X POST https://code.gelsomino.cn:8081/api/user/register \
+export REGISTER_RESULT=$(curl -s -X POST https://api.gelsomino.cn:444/api/user/register \
   -H "Content-Type: application/json" \
   -d '{"email": "test1@example.com", "password": "password123"}')
 
 # 2. 登录获取 token
-export LOGIN_RESULT=$(curl -s -X POST https://code.gelsomino.cn:8081/api/user/login \
+export LOGIN_RESULT=$(curl -s -X POST https://api.gelsomino.cn:444/api/user/login \
   -H "Content-Type: application/json" \
   -d '{"account": "test1@example.com", "password": "password123"}')
 
 export TOKEN=$(echo $LOGIN_RESULT | jq -r '.data.token')
 
 # 3. 获取用户信息
-curl -X POST https://code.gelsomino.cn:8081/api/user/self \
+curl -X POST https://api.gelsomino.cn:444/api/user/self \
   -H "Authorization: Bearer $TOKEN"
 
 # 4. 搜索用户
-curl -X GET "https://code.gelsomino.cn:8081/api/user/search?keyword=test2@example.com"
+curl -X GET "https://api.gelsomino.cn:444/api/user/search?keyword=test2@example.com"
 
 # 5. 添加好友
-curl -X POST https://code.gelsomino.cn:8081/api/friend/request \
+curl -X POST https://api.gelsomino.cn:444/api/friend/request \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"account": "test2@example.com"}'
 
 # 6. 获取好友列表
-curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
+curl -X GET https://api.gelsomino.cn:444/api/friend/list \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -1589,6 +1744,9 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
 | 单聊图片 | `{"type":"chat","to_user_id":9,"message_type":"image","content":"url"}` | 发送图片消息 |
 | 群聊文本 | `{"type":"chat","group_id":3,"message_type":"text","content":"内容"}` | 发送群消息 |
 | 群聊图片 | `{"type":"chat","group_id":3,"message_type":"image","content":"url"}` | 发送群图片 |
+| 查询单人在线状态 | `{"type":"check_online","user_id":9}` | 通过 `/ws/online` 查询单个用户在线状态 |
+| 查询多人在线状态 | `{"type":"check_online","user_ids":[9,10]}` | 通过 `/ws/online` 批量查询在线状态 |
+| 在线状态心跳 | `{"type":"ping"}` | 通过 `/ws/online` 发送应用层心跳 |
 
 #### 服务端推送消息
 
@@ -1598,6 +1756,9 @@ curl -X GET https://code.gelsomino.cn:8081/api/friend/list \
 | 发送回执 | `{"type":"sent","message":{}}` | 消息发送成功 |
 | 收到消息 | `{"type":"chat","message":{},"offline":false}` | 收到新消息 |
 | 离线消息 | `{"type":"chat","message":{},"offline":true}` | 离线期间的消息 |
+| 在线状态 | `{"type":"online_status","user_id":9,"online":true}` | 单个用户在线状态 |
+| 批量在线状态 | `{"type":"online_status","statuses":[{}]}` | 多个用户在线状态 |
+| 心跳响应 | `{"type":"pong"}` | 在线状态 WS 心跳响应 |
 | 错误 | `{"type":"error","error":"错误信息"}` | 发生错误 |
 
 ---
