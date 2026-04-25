@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
 	"sleet0922/graduation_project/internal/config"
 )
 
@@ -17,22 +20,6 @@ func InitLogger(cfg *config.ViperConfig) {
 	logConfig := cfg.Log
 	// 判断是否开发环境
 	isDev := cfg.Server.Mode != "release"
-	// 默认日志级别
-	var logLevel slog.Level
-
-	// 日志级别
-	switch logConfig.Level {
-	case "debug":
-		logLevel = slog.LevelDebug
-	case "info":
-		logLevel = slog.LevelInfo
-	case "warn":
-		logLevel = slog.LevelWarn
-	case "error":
-		logLevel = slog.LevelError
-	default:
-		logLevel = slog.LevelInfo
-	}
 
 	// 创建日志文件夹 + 文件
 	err := os.MkdirAll(filepath.Dir(logConfig.Filename), os.ModePerm)
@@ -44,15 +31,29 @@ func InitLogger(cfg *config.ViperConfig) {
 		panic("打开日志文件失败: " + err.Error())
 	}
 
-	cwd, _ := os.Getwd()
 	opts := &slog.HandlerOptions{
-		Level: logLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// 移除 level 字段
+			if a.Key == slog.LevelKey {
+				return slog.Attr{}
+			}
+			// 修改时间格式
+			if a.Key == slog.TimeKey {
+				if t, ok := a.Value.Any().(time.Time); ok {
+					a.Value = slog.StringValue(t.Format("2006/01/02 15:04:05"))
+				}
+			}
+			// 修改 source 路径为相对路径（从/pkg开始）
 			if a.Key == slog.SourceKey {
 				source, ok := a.Value.Any().(*slog.Source)
 				if ok && source != nil {
-					if rel, err := filepath.Rel(cwd, source.File); err == nil {
-						source.File = rel
+					// 查找 /pkg 在路径中的位置
+					if idx := strings.Index(source.File, "/pkg"); idx != -1 {
+						source.File = source.File[idx:]
+					}
+					// 处理 function 路径
+					if idx := strings.Index(source.Function, "/pkg"); idx != -1 {
+						source.Function = source.Function[idx:]
 					}
 				}
 			}
