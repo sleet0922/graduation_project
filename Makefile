@@ -2,7 +2,7 @@
 
 run:
 	# 关闭8081进程
-	-fuser -k 8081/tcp 2>/dev/null || true
+	-sudo fuser -k 8081/tcp 2>/dev/null || true
 
 	# 清空日志
 	> logs/app.log 2>/dev/null || true
