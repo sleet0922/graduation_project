@@ -444,6 +444,7 @@ curl -X POST https://api.gelsomino.cn:444/api/user/delete \
 |----------|----------|------|
 | 头像 | `avatar/` | `avatar/avatar_6_1776183103821.jpg` |
 | 聊天图片 | `chat/` | `chat/chat_6_1776183103821_0.jpg` |
+| 聊天视频 | `chat/` | `chat/chat_6_1776183103821_0.mp4` |
 
 ### 11. 获取上传 URL
 
@@ -456,7 +457,7 @@ curl -X POST https://api.gelsomino.cn:444/api/user/delete \
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `key` | string | 是 | 文件名 |
-| `type` | string | 否 | 文件类型：`avatar`(头像) 或 `chat`(聊天图片)，默认 `chat` |
+| `type` | string | 否 | 文件类型：`avatar`(头像)、`chat`(聊天图片) 或 `video`(聊天视频)，默认 `chat` |
 
 **请求示例：**
 
@@ -467,6 +468,10 @@ curl -X GET "https://api.gelsomino.cn:444/api/oss/upload-url?key=avatar_6_177618
 
 # 上传聊天图片
 curl -X GET "https://api.gelsomino.cn:444/api/oss/upload-url?key=chat_6_1776183103821_0.jpg&type=chat" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 上传聊天视频
+curl -X GET "https://api.gelsomino.cn:444/api/oss/upload-url?key=chat_6_1776183103821_0.mp4&type=video" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -576,9 +581,46 @@ curl -X POST https://api.gelsomino.cn:444/api/chat/upload/image \
 
 ---
 
+### 14. 上传聊天视频（直传）
+
+**接口地址：** `POST /api/chat/upload/video`
+
+**认证要求：** 是
+
+**请求参数：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `file` | file | 是 | 视频文件，支持常见 video/* 类型，最大 100MB |
+
+**请求示例：**
+
+```bash
+curl -X POST https://api.gelsomino.cn:444/api/chat/upload/video \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@./test.mp4"
+```
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "data": {
+    "url": "https://cdn.gelsomino.cn/chat/chat_6_1776183103821_0.mp4",
+    "content": "https://cdn.gelsomino.cn/chat/chat_6_1776183103821_0.mp4",
+    "filename": "test.mp4",
+    "contentType": "video/mp4"
+  },
+  "message": "上传聊天视频成功"
+}
+```
+
+---
+
 ## 好友相关 API
 
-### 14. 发送好友请求
+### 15. 发送好友请求
 
 **接口地址：** `POST /api/friend/request`
 
@@ -610,7 +652,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/request \
 
 ---
 
-### 15. 获取好友请求列表
+### 16. 获取好友请求列表
 
 **接口地址：** `GET /api/friend/requests`
 
@@ -644,7 +686,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/request \
 
 ---
 
-### 16. 处理好友申请
+### 17. 处理好友申请
 
 **接口地址：** `POST /api/friend/handle`
 
@@ -675,7 +717,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
 
 ---
 
-### 17. 获取好友列表
+### 18. 获取好友列表
 
 **接口地址：** `GET /api/friend/list`
 
@@ -707,7 +749,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
 
 ---
 
-### 18. 检查好友关系
+### 19. 检查好友关系
 
 **接口地址：** `POST /api/friend/check`
 
@@ -733,7 +775,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
 
 ---
 
-### 19. 删除好友
+### 20. 删除好友
 
 **接口地址：** `POST /api/friend/delete`
 
@@ -747,7 +789,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
 
 ---
 
-### 20. 修改好友备注
+### 21. 修改好友备注
 
 **接口地址：** `POST /api/friend/remark_update`
 
@@ -764,7 +806,7 @@ curl -X POST https://api.gelsomino.cn:444/api/friend/handle \
 
 ## 群聊相关 API
 
-### 21. 创建群聊
+### 22. 创建群聊
 
 **接口地址：** `POST /api/group/create`
 
@@ -811,7 +853,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ---
 
-### 22. 获取群聊列表
+### 23. 获取群聊列表
 
 **接口地址：** `GET /api/group/list`
 
@@ -839,7 +881,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ---
 
-### 23. 获取群成员列表
+### 24. 获取群成员列表
 
 **接口地址：** `GET /api/group/members`
 
@@ -887,7 +929,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ---
 
-### 24. 拉好友进群
+### 25. 拉好友进群
 
 **接口地址：** `POST /api/group/member/add`
 
@@ -902,7 +944,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ---
 
-### 25. 踢出群成员
+### 26. 踢出群成员
 
 **接口地址：** `POST /api/group/member/remove`
 
@@ -919,7 +961,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ---
 
-### 26. 退出群聊
+### 27. 退出群聊
 
 **接口地址：** `POST /api/group/leave`
 
@@ -935,7 +977,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ---
 
-### 27. 删除群聊（解散）
+### 28. 删除群聊（解散）
 
 **接口地址：** `POST /api/group/delete`
 
@@ -953,7 +995,7 @@ curl -X POST https://api.gelsomino.cn:444/api/group/create \
 
 ## WebSocket 实时聊天
 
-### 28. 建立 WebSocket 连接
+### 29. 建立 WebSocket 连接
 
 **连接地址：** `wss://api.gelsomino.cn:444/ws/chat?token=<token>`
 
@@ -993,7 +1035,7 @@ ws.onerror = (error) => {
 
 ---
 
-### 29. 发送单聊消息
+### 30. 发送单聊消息
 
 **客户端发送：**
 
@@ -1028,7 +1070,7 @@ ws.onerror = (error) => {
 
 ---
 
-### 30. 发送群聊消息
+### 31. 发送群聊消息
 
 **客户端发送：**
 
@@ -1052,7 +1094,7 @@ ws.onerror = (error) => {
 
 ---
 
-### 31. 消息回执
+### 32. 消息回执
 
 **发送成功回执（发送方收到）：**
 
@@ -1118,7 +1160,7 @@ ws.onerror = (error) => {
 
 ---
 
-### 32. WebSocket 错误消息
+### 33. WebSocket 错误消息
 
 ```json
 {
@@ -1141,7 +1183,7 @@ ws.onerror = (error) => {
 
 ---
 
-### 33. WebSocket 心跳机制
+### 34. WebSocket 心跳机制
 
 **后端机制：**
 - 服务端每 5 秒发送一次 Ping 帧
@@ -1157,7 +1199,7 @@ ws.onerror = (error) => {
 
 ## WebSocket 在线状态
 
-### 34. 建立在线状态 WebSocket 连接
+### 35. 建立在线状态 WebSocket 连接
 
 **连接地址：** `wss://api.gelsomino.cn:444/ws/online?token=<token>`
 
@@ -1187,7 +1229,7 @@ onlineWs.onmessage = (event) => {
 
 ---
 
-### 35. 查询用户在线状态
+### 36. 查询用户在线状态
 
 **查询单个用户：**
 
@@ -1245,7 +1287,7 @@ onlineWs.onmessage = (event) => {
 
 ---
 
-### 36. 在线状态心跳与错误
+### 37. 在线状态心跳与错误
 
 **客户端心跳：**
 
@@ -1285,7 +1327,7 @@ onlineWs.onmessage = (event) => {
 
 系统支持端到端加密（End-to-End Encryption），使用 X25519 + ChaCha20-Poly1305 算法。
 
-### 37. 发布用户公钥
+### 38. 发布用户公钥
 
 **接口地址：** `POST /api/e2ee/keys/publish`
 
@@ -1326,7 +1368,7 @@ curl -X POST https://api.gelsomino.cn:444/api/e2ee/keys/publish \
 
 ---
 
-### 38. 获取用户公钥
+### 39. 获取用户公钥
 
 **接口地址：** `GET /api/e2ee/keys/public`
 
@@ -1355,7 +1397,7 @@ curl -X POST https://api.gelsomino.cn:444/api/e2ee/keys/publish \
 
 ---
 
-### 39. 获取群聊当前密钥
+### 40. 获取群聊当前密钥
 
 **接口地址：** `GET /api/e2ee/group/key/current`
 
@@ -1400,7 +1442,7 @@ curl -X POST https://api.gelsomino.cn:444/api/e2ee/keys/publish \
 
 ---
 
-### 40. 发布群聊密钥盒子
+### 41. 发布群聊密钥盒子
 
 **接口地址：** `POST /api/e2ee/group/key/publish`
 
@@ -1445,7 +1487,7 @@ curl -X POST https://api.gelsomino.cn:444/api/e2ee/group/key/publish \
 
 ---
 
-### 41. 获取指定版本群密钥
+### 42. 获取指定版本群密钥
 
 **接口地址：** `GET /api/e2ee/group/key/by-version`
 
@@ -1473,7 +1515,7 @@ curl -X POST https://api.gelsomino.cn:444/api/e2ee/group/key/publish \
 | `audio` | 语音通话 |
 | `video` | 视频通话 |
 
-### 42. 发起通话邀请
+### 43. 发起通话邀请
 
 **接口地址：** `POST /api/rtc/call/invite`
 
@@ -1529,7 +1571,7 @@ curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
 
 ---
 
-### 43. 接受通话
+### 44. 接受通话
 
 **接口地址：** `POST /api/rtc/call/accept`
 
@@ -1556,7 +1598,7 @@ curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
 
 ---
 
-### 44. 拒绝通话
+### 45. 拒绝通话
 
 **接口地址：** `POST /api/rtc/call/reject`
 
@@ -1571,7 +1613,7 @@ curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
 
 ---
 
-### 45. 取消通话
+### 46. 取消通话
 
 **接口地址：** `POST /api/rtc/call/cancel`
 
@@ -1587,7 +1629,7 @@ curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
 
 ---
 
-### 46. 挂断通话
+### 47. 挂断通话
 
 **接口地址：** `POST /api/rtc/call/hangup`
 
@@ -1603,7 +1645,7 @@ curl -X POST https://api.gelsomino.cn:444/api/rtc/call/invite \
 
 ---
 
-### 47. 获取 RTC Token
+### 48. 获取 RTC Token
 
 **接口地址：** `POST /api/rtc/token`
 

@@ -51,6 +51,8 @@ func (h *OssHandler) GetUploadURL(c *gin.Context) {
 		fullObjectKey = "avatar/" + objectKey
 	case "chat":
 		fullObjectKey = "chat/" + objectKey
+	case "video":
+		fullObjectKey = "chat/" + objectKey
 	default:
 		fullObjectKey = objectKey
 	}
@@ -151,4 +153,45 @@ func (h *OssHandler) UploadChatImage(c *gin.Context) {
 		"filename":    file.Filename,
 		"contentType": contentType,
 	}, "上传聊天图片成功")
+}
+
+func (h *OssHandler) UploadChatVideo(c *gin.Context) {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "请选择视频文件")
+		return
+	}
+	if file.Size == 0 {
+		response.Error(c, http.StatusBadRequest, "视频不能为空")
+		return
+	}
+	if file.Size > 100*1024*1024 {
+		response.Error(c, http.StatusBadRequest, "视频大小不能超过100MB")
+		return
+	}
+	contentType := file.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "video/") && contentType != "application/octet-stream" {
+		response.Error(c, http.StatusBadRequest, "仅支持视频或二进制流上传")
+		return
+	}
+
+	userID := userIDVal.(uint)
+	fileURL, err := h.kodoClient.UploadFile(c.Request.Context(), file, fmt.Sprintf("chat/%d", userID))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "上传聊天视频失败")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"url":         fileURL,
+		"content":     fileURL,
+		"filename":    file.Filename,
+		"contentType": contentType,
+	}, "上传聊天视频成功")
 }
