@@ -89,64 +89,69 @@ func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysD
 	connectionIDs := connectionIDsFromMap(s.connections[userID])
 	s.mu.Unlock()
 	logger.Info("websocket connection registered", "user_id", userID, "connection_ids", connectionIDs, "connection_count", len(connectionIDs))
-	if len(pending) == 0 && len(pendingSystem) == 0 {
-		return connectionID
-	}
-	delivered := make(map[string]struct{}, len(pending))
-	for _, message := range pending {
 
-		if err := deliver(message, true); err == nil {
-			delivered[message.ID] = struct{}{}
-		}
-	}
-	if len(delivered) > 0 {
-		s.mu.Lock()
-		queue := s.offline[userID]
-		remaining := make([]*model.ChatMessage, 0, len(queue))
-		for _, message := range queue {
-			if _, ok := delivered[message.ID]; !ok {
-				remaining = append(remaining, message)
+	// 投递内存中的离线消息
+	delivered := make(map[string]struct{}, len(pending))
+	if len(pending) > 0 {
+		for _, message := range pending {
+			if err := deliver(message, true); err == nil {
+				delivered[message.ID] = struct{}{}
 			}
 		}
-		if len(remaining) == 0 {
-			delete(s.offline, userID)
-		} else {
-			s.offline[userID] = remaining
-		}
-		s.mu.Unlock()
-	}
-	if len(pendingSystem) == 0 || sysDeliver == nil {
-		return connectionID
-	}
-	deliveredSystem := make(map[string]struct{}, len(pendingSystem))
-	for _, event := range pendingSystem {
-		if event == nil {
-			continue
-		}
-		if err := sysDeliver(event.payload); err == nil {
-			deliveredSystem[event.id] = struct{}{}
+		if len(delivered) > 0 {
+			s.mu.Lock()
+			queue := s.offline[userID]
+			remaining := make([]*model.ChatMessage, 0, len(queue))
+			for _, message := range queue {
+				if _, ok := delivered[message.ID]; !ok {
+					remaining = append(remaining, message)
+				}
+			}
+			if len(remaining) == 0 {
+				delete(s.offline, userID)
+			} else {
+				s.offline[userID] = remaining
+			}
+			s.mu.Unlock()
 		}
 	}
-	if len(deliveredSystem) == 0 {
-		return connectionID
-	}
-	s.mu.Lock()
-	systemQueue := s.systemOffline[userID]
-	remainingSystem := make([]*queuedSystemEvent, 0, len(systemQueue))
-	for _, event := range systemQueue {
-		if event == nil {
-			continue
+
+	// 投递内存中的系统事件
+	if len(pendingSystem) > 0 && sysDeliver != nil {
+		deliveredSystem := make(map[string]struct{}, len(pendingSystem))
+		for _, event := range pendingSystem {
+			if event == nil {
+				continue
+			}
+			if err := sysDeliver(event.payload); err == nil {
+				deliveredSystem[event.id] = struct{}{}
+			}
 		}
-		if _, ok := deliveredSystem[event.id]; !ok {
-			remainingSystem = append(remainingSystem, event)
+		if len(deliveredSystem) > 0 {
+			s.mu.Lock()
+			systemQueue := s.systemOffline[userID]
+			remainingSystem := make([]*queuedSystemEvent, 0, len(systemQueue))
+			for _, event := range systemQueue {
+				if event == nil {
+					continue
+				}
+				if _, ok := deliveredSystem[event.id]; !ok {
+					remainingSystem = append(remainingSystem, event)
+				}
+			}
+			if len(remainingSystem) == 0 {
+				delete(s.systemOffline, userID)
+			} else {
+				s.systemOffline[userID] = remainingSystem
+			}
+			s.mu.Unlock()
 		}
 	}
-	if len(remainingSystem) == 0 {
-		delete(s.systemOffline, userID)
-	} else {
-		s.systemOffline[userID] = remainingSystem
-	}
-	s.mu.Unlock()
+
+	// 服务重启后内存离线队列会丢失，但 Redis 中仍有残留消息。
+	// 连接建立后将 Redis 中的消息也投递出去并清理，避免消息丢失。
+	s.drainRedisMessages(userID, delivered, deliver)
+
 	return connectionID
 }
 
@@ -371,6 +376,42 @@ func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) 
 	pushKey := fmt.Sprintf("chat:push:%d", userID)
 	redis.RedisClient.RPush(context.Background(), pushKey, msgBytes)
 	redis.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
+}
+
+// drainRedisMessages 从 Redis 中拉取该用户的残留推送消息，
+// 跳过已在内存中投递过的（通过 deliveredIDs 去重），
+// 投递成功后删除 Redis 中的 key。
+func (s *chatService) drainRedisMessages(userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
+	if redis.RedisClient == nil {
+		return
+	}
+	pushKey := fmt.Sprintf("chat:push:%d", userID)
+	ctx := context.Background()
+
+	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
+	if err != nil || len(rawList) == 0 {
+		return
+	}
+
+	anyDelivered := false
+	for _, raw := range rawList {
+		var message model.ChatMessage
+		if err := json.Unmarshal([]byte(raw), &message); err != nil {
+			continue
+		}
+		if _, alreadyDelivered := deliveredIDs[message.ID]; alreadyDelivered {
+			continue
+		}
+		if err := deliver(&message, true); err != nil {
+			continue
+		}
+		deliveredIDs[message.ID] = struct{}{}
+		anyDelivered = true
+	}
+
+	if anyDelivered || len(rawList) > 0 {
+		redis.RedisClient.Del(ctx, pushKey)
+	}
 }
 
 func connectionIDsFromMap(connections map[string]*chatConnection) []string {
