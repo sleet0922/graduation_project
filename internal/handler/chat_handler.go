@@ -57,6 +57,43 @@ func NewChatHandler(chatService service.ChatService, jwtManager *jwt.JWTManager)
 	}
 }
 
+// ----------chatSocketWriter 底层方法----------
+func (w *chatSocketWriter) Write(ctx context.Context, payload chatOutgoingMessage) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
+	defer cancel()
+	return wsjson.Write(writeCtx, w.conn, payload)
+}
+
+func (w *chatSocketWriter) Ping(ctx context.Context) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.conn.Ping(ctx)
+}
+
+func (w *chatSocketWriter) WriteAny(ctx context.Context, payload any, verifyAlive bool) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if verifyAlive {
+		pingCtx, cancel := context.WithTimeout(ctx, chatPingTimeout)
+		err := w.conn.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+
+	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
+	defer cancel()
+	return wsjson.Write(writeCtx, w.conn, payload)
+}
+
+func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMessage, verifyAlive bool) error {
+	return w.WriteAny(ctx, payload, verifyAlive)
+}
+
+// ----------ChatHandler 方法----------
 func (h *ChatHandler) Connect(c *gin.Context) {
 	userIDVal, exists := c.Get("user_id")
 	if !exists {
@@ -166,39 +203,4 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			return
 		}
 	}
-}
-
-func (w *chatSocketWriter) Write(ctx context.Context, payload chatOutgoingMessage) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.conn, payload)
-}
-
-func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMessage, verifyAlive bool) error {
-	return w.WriteAny(ctx, payload, verifyAlive)
-}
-
-func (w *chatSocketWriter) WriteAny(ctx context.Context, payload any, verifyAlive bool) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if verifyAlive {
-		pingCtx, cancel := context.WithTimeout(ctx, chatPingTimeout)
-		err := w.conn.Ping(pingCtx)
-		cancel()
-		if err != nil {
-			return err
-		}
-	}
-
-	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.conn, payload)
-}
-
-func (w *chatSocketWriter) Ping(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.conn.Ping(ctx)
 }

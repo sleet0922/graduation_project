@@ -25,6 +25,11 @@ func NewChatRepository(db *gorm.DB) ChatRepository {
 	return &chatRepository{db: db}
 }
 
+// deletedMarker 用于群聊消息的"软删除标记"，每个用户独立标记
+func deletedMarker(userID uint) string {
+	return fmt.Sprintf(",%d,", userID)
+}
+
 func (r *chatRepository) Save(message *model.ChatMessage) error {
 	return r.db.Create(message).Error
 }
@@ -97,8 +102,4 @@ func (r *chatRepository) DeleteAllHistory(userID uint) error {
 	return r.db.Model(&model.ChatMessage{}).
 		Where("conversation_type = ? AND group_id IN (?) AND (deleted_by IS NULL OR deleted_by NOT LIKE ?)", "group", groupMembershipSubQuery, deletedMarker(userID)).
 		Update("deleted_by", gorm.Expr("CONCAT(COALESCE(deleted_by, ''), ?)", deletedMarker(userID))).Error
-}
-
-func deletedMarker(userID uint) string {
-	return fmt.Sprintf(",%d,", userID)
 }

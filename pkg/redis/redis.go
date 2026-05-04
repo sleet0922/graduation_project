@@ -34,6 +34,10 @@ func InitRedis(cfg *config.ViperConfig) {
 
 const sessionKeyPrefix = "user:session:"
 
+func sessionKey(userID uint) string {
+	return fmt.Sprintf("%s%d", sessionKeyPrefix, userID)
+}
+
 // SetUserSession 设置用户当前有效 session_id，返回被替换的旧 session_id）
 func SetUserSession(userID uint, sessionID string, ttl time.Duration) (string, error) {
 	if RedisClient == nil {
@@ -83,8 +87,4 @@ func IsSessionValid(userID uint, sessionID string) bool {
 		return true // Redis 异常时放行，避免误伤
 	}
 	return current == "" || current == sessionID
-}
-
-func sessionKey(userID uint) string {
-	return fmt.Sprintf("%s%d", sessionKeyPrefix, userID)
 }

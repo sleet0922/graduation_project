@@ -47,6 +47,54 @@ func NewGroupService(groupRepo repo.GroupRepository, friendRepo repo.FriendRepos
 	}
 }
 
+// ----------群组 service 私有方法----------
+func normalizeMemberIDs(excludeID uint, memberIDs []uint) []uint {
+	seen := make(map[uint]struct{}, len(memberIDs))
+	result := make([]uint, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		if memberID == 0 || memberID == excludeID {
+			continue
+		}
+		if _, ok := seen[memberID]; ok {
+			continue
+		}
+		seen[memberID] = struct{}{}
+		result = append(result, memberID)
+	}
+	return result
+}
+
+func (s *groupService) validateInvitees(operatorID uint, memberIDs []uint) error {
+	for _, memberID := range memberIDs {
+		user, err := s.userRepo.GetByID(context.Background(), memberID)
+		if err != nil || user == nil {
+			return ErrGroupMemberNotFound
+		}
+		if operatorID != 0 && !s.friendRepo.CheckFriendship(operatorID, memberID) {
+			return ErrGroupFriendOnly
+		}
+	}
+	return nil
+}
+
+func (s *groupService) buildGroupDetail(group *model.ChatGroup) (*model.ChatGroupDetail, error) {
+	count, err := s.groupRepo.CountMembers(group.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &model.ChatGroupDetail{
+		ID:          group.ID,
+		Name:        group.Name,
+		Avatar:      group.Avatar,
+		OwnerID:     group.OwnerID,
+		MemberCount: count,
+		CreatedAt:   group.CreatedAt,
+		UpdatedAt:   group.UpdatedAt,
+	}, nil
+}
+
+// ----------群组 service 方法----------
+
 func (s *groupService) CreateGroup(ownerID uint, name, avatar string, memberIDs []uint) (*model.ChatGroupDetail, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -231,49 +279,4 @@ func (s *groupService) GetMembers(userID, groupID uint) ([]*model.ChatGroupMembe
 		})
 	}
 	return result, nil
-}
-
-func (s *groupService) validateInvitees(operatorID uint, memberIDs []uint) error {
-	for _, memberID := range memberIDs {
-		user, err := s.userRepo.GetByID(context.Background(), memberID)
-		if err != nil || user == nil {
-			return ErrGroupMemberNotFound
-		}
-		if operatorID != 0 && !s.friendRepo.CheckFriendship(operatorID, memberID) {
-			return ErrGroupFriendOnly
-		}
-	}
-	return nil
-}
-
-func (s *groupService) buildGroupDetail(group *model.ChatGroup) (*model.ChatGroupDetail, error) {
-	count, err := s.groupRepo.CountMembers(group.ID)
-	if err != nil {
-		return nil, err
-	}
-	return &model.ChatGroupDetail{
-		ID:          group.ID,
-		Name:        group.Name,
-		Avatar:      group.Avatar,
-		OwnerID:     group.OwnerID,
-		MemberCount: count,
-		CreatedAt:   group.CreatedAt,
-		UpdatedAt:   group.UpdatedAt,
-	}, nil
-}
-
-func normalizeMemberIDs(excludeID uint, memberIDs []uint) []uint {
-	seen := make(map[uint]struct{}, len(memberIDs))
-	result := make([]uint, 0, len(memberIDs))
-	for _, memberID := range memberIDs {
-		if memberID == 0 || memberID == excludeID {
-			continue
-		}
-		if _, ok := seen[memberID]; ok {
-			continue
-		}
-		seen[memberID] = struct{}{}
-		result = append(result, memberID)
-	}
-	return result
 }

@@ -58,6 +58,41 @@ func NewE2EEService(keyRepo repo.E2EEKeyRepository, groupRepo repo.GroupReposito
 	}
 }
 
+// ----------E2EE service 工具函数----------
+func decodeBase64URLOrStd(raw string) ([]byte, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("empty base64 input")
+	}
+	if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		return decoded, nil
+	}
+	return nil, fmt.Errorf("invalid base64")
+}
+
+func isSupportedKeyBox(box *model.E2EEGroupKeyBox) bool {
+	if box == nil {
+		return false
+	}
+	if box.KeyWrapAlg != "chacha20poly1305-v1" {
+		return false
+	}
+	groupKey, err := decodeBase64URLOrStd(box.WrappedGroupKey)
+	if err != nil {
+		return false
+	}
+	// ciphertext + tag 至少大于纯明文长度
+	if len(groupKey) <= 16 {
+		return false
+	}
+	nonce, err := decodeBase64URLOrStd(box.WrapNonce)
+	return err == nil && len(nonce) == 12
+}
+
+// ----------E2EE service 方法----------
+
 func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, keyType, publicKey string) (*model.E2EEUserPublicKey, error) {
 	normalizedKeyType := strings.ToLower(strings.TrimSpace(keyType))
 	if normalizedKeyType != "x25519" {
@@ -233,36 +268,4 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 		return ErrE2EEGroupBoxesInvalid
 	}
 	return s.groupKeyRepo.ReplaceVersionBoxes(ctx, groupID, keyVersion, modelBoxes)
-}
-
-func isSupportedKeyBox(box *model.E2EEGroupKeyBox) bool {
-	if box == nil {
-		return false
-	}
-	if box.KeyWrapAlg != "chacha20poly1305-v1" {
-		return false
-	}
-	groupKey, err := decodeBase64URLOrStd(box.WrappedGroupKey)
-	if err != nil {
-		return false
-	}
-	// ciphertext + tag 至少大于纯明文长度
-	if len(groupKey) <= 16 {
-		return false
-	}
-	nonce, err := decodeBase64URLOrStd(box.WrapNonce)
-	return err == nil && len(nonce) == 12
-}
-
-func decodeBase64URLOrStd(raw string) ([]byte, error) {
-	if raw == "" {
-		return nil, fmt.Errorf("empty base64 input")
-	}
-	if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
-		return decoded, nil
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
-		return decoded, nil
-	}
-	return nil, fmt.Errorf("invalid base64")
 }

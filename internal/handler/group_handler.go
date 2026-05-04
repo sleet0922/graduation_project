@@ -15,6 +15,15 @@ type GroupHandler struct {
 	chatService  service.ChatService
 }
 
+// ----------群组 handler 私有方法----------
+func (h *GroupHandler) getUserID(c *gin.Context) (uint, error) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, fmt.Errorf("user_id not found in context")
+	}
+	return userID.(uint), nil
+}
+
 func NewGroupHandler(groupService service.GroupService, chatService service.ChatService) *GroupHandler {
 	return &GroupHandler{groupService: groupService, chatService: chatService}
 }
@@ -198,12 +207,4 @@ func (h *GroupHandler) GetMembers(c *gin.Context) {
 		return
 	}
 	response.Success(c, members, "获取群成员成功")
-}
-
-func (h *GroupHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
 }

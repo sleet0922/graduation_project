@@ -20,39 +20,6 @@ func NewJWTMiddleware(jwtManager *jwt.JWTManager) *JWTMiddleware {
 	}
 }
 
-func (m *JWTMiddleware) Auth() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := m.extractAndValidateToken(c)
-		if claims == nil {
-			return
-		}
-		c.Set("user_id", uint(claims.UserID))
-		c.Set("account", claims.Account)
-		c.Set("session_id", claims.SessionID)
-		c.Next()
-	}
-}
-
-// WSAuth WebSocket 专用认证：额外校验 session_id 是否仍然有效（未被踢下线）
-func (m *JWTMiddleware) WSAuth() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		claims := m.extractAndValidateToken(c)
-		if claims == nil {
-			return
-		}
-		// 校验 session 是否仍然有效（未被新登录踢下线）
-		if !redisPkg.IsSessionValid(uint(claims.UserID), claims.SessionID) {
-			response.Error(c, http.StatusUnauthorized, "账号在其他设备登录，请重新登录")
-			c.Abort()
-			return
-		}
-		c.Set("user_id", uint(claims.UserID))
-		c.Set("account", claims.Account)
-		c.Set("session_id", claims.SessionID)
-		c.Next()
-	}
-}
-
 // extractAndValidateToken 提取并验证 token，返回 claims，失败时已写入响应
 func (m *JWTMiddleware) extractAndValidateToken(c *gin.Context) *jwt.Claims {
 	var tokenString string
@@ -84,6 +51,39 @@ func (m *JWTMiddleware) extractAndValidateToken(c *gin.Context) *jwt.Claims {
 		return nil
 	}
 	return claims
+}
+
+func (m *JWTMiddleware) Auth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := m.extractAndValidateToken(c)
+		if claims == nil {
+			return
+		}
+		c.Set("user_id", uint(claims.UserID))
+		c.Set("account", claims.Account)
+		c.Set("session_id", claims.SessionID)
+		c.Next()
+	}
+}
+
+// WSAuth WebSocket 专用认证：额外校验 session_id 是否仍然有效（未被踢下线）
+func (m *JWTMiddleware) WSAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := m.extractAndValidateToken(c)
+		if claims == nil {
+			return
+		}
+		// 校验 session 是否仍然有效（未被新登录踢下线）
+		if !redisPkg.IsSessionValid(uint(claims.UserID), claims.SessionID) {
+			response.Error(c, http.StatusUnauthorized, "账号在其他设备登录，请重新登录")
+			c.Abort()
+			return
+		}
+		c.Set("user_id", uint(claims.UserID))
+		c.Set("account", claims.Account)
+		c.Set("session_id", claims.SessionID)
+		c.Next()
+	}
 }
 
 func (m *JWTMiddleware) OptionalAuth() gin.HandlerFunc {

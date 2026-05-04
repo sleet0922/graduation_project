@@ -19,6 +19,70 @@ const (
 	PrivSubscribeStream uint16 = 4     // 订阅流：看别人嗒
 )
 
+// ----------Token 底层打包函数----------
+func packUint16(v uint16) []byte {
+	buf := make([]byte, 2)
+	binary.LittleEndian.PutUint16(buf, v)
+	return buf
+}
+
+func packUint32(v uint32) []byte {
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, v)
+	return buf
+}
+
+func packBytes(v []byte) []byte {
+	buf := packUint16(uint16(len(v)))
+	return append(buf, v...)
+}
+
+func packString(v string) []byte {
+	return packBytes([]byte(v))
+}
+
+func packMapUint32(m map[uint16]uint32) []byte {
+	keys := make([]int, 0, len(m))
+	for key := range m {
+		keys = append(keys, int(key))
+	}
+	sort.Ints(keys)
+
+	buf := packUint16(uint16(len(m)))
+	for _, key := range keys {
+		buf = append(buf, packUint16(uint16(key))...)
+		buf = append(buf, packUint32(m[uint16(key)])...)
+	}
+	return buf
+}
+
+func sign(appKey string, msg []byte) []byte {
+	mac := hmac.New(sha256.New, []byte(appKey))
+	mac.Write(msg)
+	return mac.Sum(nil)
+}
+
+func randomNonce() uint32 {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return uint32(time.Now().UnixNano()%99999999) + 1
+	}
+	nonce := binary.LittleEndian.Uint32(buf[:]) % 99999999
+	if nonce == 0 {
+		return 1
+	}
+	return nonce
+}
+
+// 转换为Unix时间戳
+func toUnix(t time.Time) uint32 {
+	if t.IsZero() {
+		return 0
+	}
+	return uint32(t.Unix())
+}
+
+// ----------AccessToken 方法----------
 type AccessToken struct {
 	appID      string
 	appKey     string
@@ -42,14 +106,6 @@ func NewAccessToken(appID, appKey, roomID, userID string) *AccessToken {
 	}
 }
 
-// 转换为Unix时间戳
-func toUnix(t time.Time) uint32 {
-	if t.IsZero() {
-		return 0
-	}
-	return uint32(t.Unix())
-}
-
 // 设置过期时间
 func (t *AccessToken) ExpireTime(expireAt time.Time) {
 	t.expireAt = toUnix(expireAt)
@@ -66,14 +122,6 @@ func (t *AccessToken) AddPrivilege(privilege uint16, expireAt time.Time) {
 	}
 }
 
-// 序列化Token
-func (t *AccessToken) Serialize() string {
-	msg := t.packMsg()
-	signature := sign(t.appKey, msg)
-	content := append(packBytes(msg), packBytes(signature)...)
-	return Version + t.appID + base64.StdEncoding.EncodeToString(content)
-}
-
 // 打包消息数据
 func (t *AccessToken) packMsg() []byte {
 	msg := make([]byte, 0, 64)
@@ -86,58 +134,10 @@ func (t *AccessToken) packMsg() []byte {
 	return msg
 }
 
-// 签名
-func sign(appKey string, msg []byte) []byte {
-	mac := hmac.New(sha256.New, []byte(appKey))
-	mac.Write(msg)
-	return mac.Sum(nil)
-}
-
-// 生成随机数
-func randomNonce() uint32 {
-	var buf [4]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return uint32(time.Now().UnixNano()%99999999) + 1
-	}
-	nonce := binary.LittleEndian.Uint32(buf[:]) % 99999999
-	if nonce == 0 {
-		return 1
-	}
-	return nonce
-}
-
-func packUint16(v uint16) []byte {
-	buf := make([]byte, 2)
-	binary.LittleEndian.PutUint16(buf, v)
-	return buf
-}
-
-func packUint32(v uint32) []byte {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, v)
-	return buf
-}
-
-func packString(v string) []byte {
-	return packBytes([]byte(v))
-}
-
-func packBytes(v []byte) []byte {
-	buf := packUint16(uint16(len(v)))
-	return append(buf, v...)
-}
-
-func packMapUint32(m map[uint16]uint32) []byte {
-	keys := make([]int, 0, len(m))
-	for key := range m {
-		keys = append(keys, int(key))
-	}
-	sort.Ints(keys)
-
-	buf := packUint16(uint16(len(m)))
-	for _, key := range keys {
-		buf = append(buf, packUint16(uint16(key))...)
-		buf = append(buf, packUint32(m[uint16(key)])...)
-	}
-	return buf
+// 序列化Token
+func (t *AccessToken) Serialize() string {
+	msg := t.packMsg()
+	signature := sign(t.appKey, msg)
+	content := append(packBytes(msg), packBytes(signature)...)
+	return Version + t.appID + base64.StdEncoding.EncodeToString(content)
 }

@@ -141,6 +141,199 @@ func NewRTCService(cfg *config.ViperConfig, userRepo repo.UserRepository, friend
 	}
 }
 
+// ----------RTC service 工具函数----------
+func (s *rtcService) pushSystemEvent(userIDs []uint, payload any) []SystemPushResult {
+	if s.chatService == nil || len(userIDs) == 0 {
+		return nil
+	}
+	return s.chatService.PushSystemEvent(userIDs, payload)
+}
+
+func (s *rtcService) ensureUsersAvailable(userIDs []uint) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, userID := range userIDs {
+		if activeCallID, busy := s.activeCallByID[userID]; busy {
+			logger.Info("rtc invite conflict", "user_id", userID, "active_call_id", activeCallID)
+			return &RTCServiceError{HTTPCode: 409, Message: "目标用户忙线中"}
+		}
+	}
+	return nil
+}
+
+func (s *rtcService) connectionIDs(userID uint) []string {
+	if s.chatService == nil {
+		return nil
+	}
+	return s.chatService.GetConnectionIDs(userID)
+}
+
+func (s *rtcService) canHangup(call *rtcCall, userID uint) bool {
+	if call.InitiatorID == userID {
+		return true
+	}
+	return call.AcceptedIDs[userID]
+}
+
+func (s *rtcService) participantIDs(call *rtcCall) []uint {
+	userIDs := make([]uint, 0, len(call.InviteeIDs)+1)
+	userIDs = append(userIDs, call.InitiatorID)
+	userIDs = append(userIDs, call.InviteeIDs...)
+	return userIDs
+}
+
+func (s *rtcService) otherParticipantIDs(call *rtcCall, excludeID uint) []uint {
+	participants := s.participantIDs(call)
+	result := make([]uint, 0, len(participants))
+	for _, userID := range participants {
+		if userID == excludeID {
+			continue
+		}
+		result = append(result, userID)
+	}
+	return result
+}
+
+func (s *rtcService) nextCallIdentifiers() (string, string) {
+	seq := atomic.AddUint64(&s.sequence, 1) % 1000
+	stamp := time.Now().Format("20060102150405")
+	suffix := fmt.Sprintf("%s%03d", stamp, seq)
+	return "call_" + suffix, "rtc_room_" + suffix
+}
+
+func (s *rtcService) mapRecordError(err error, notFoundMsg, internalMsg string) error {
+	if err == nil {
+		return nil
+	}
+	if err == gorm.ErrRecordNotFound {
+		return &RTCServiceError{HTTPCode: 404, Message: notFoundMsg}
+	}
+	return &RTCServiceError{HTTPCode: 500, Message: internalMsg}
+}
+
+func normalizeCallType(callType string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(callType))
+	if value != "video" && value != "voice" {
+		return "", &RTCServiceError{HTTPCode: 400, Message: "call_type 仅支持 video 或 voice"}
+	}
+	return value, nil
+}
+
+func normalizeRejectReason(reason string) string {
+	value := strings.ToLower(strings.TrimSpace(reason))
+	if value == "busy" {
+		return "busy"
+	}
+	return "rejected"
+}
+
+func containsUint(values []uint, target uint) bool {
+	return slices.Contains(values, target)
+}
+
+func isTerminalStatus(status string) bool {
+	switch status {
+	case rtcCallStatusRejected, rtcCallStatusCanceled, rtcCallStatusEnded, rtcCallStatusTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func loadRTCTokenLifetime(seconds int) time.Duration {
+	if seconds <= 0 {
+		return defaultRTCTokenExpire
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (s *rtcService) releaseCall(callID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	call, ok := s.calls[callID]
+	if !ok {
+		return
+	}
+	for _, participantID := range s.participantIDs(call) {
+		delete(s.activeCallByID, participantID)
+	}
+	delete(s.calls, callID)
+	logger.Info("rtc call released", "call_id", callID)
+}
+
+func mustJSON(payload any) string {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf("marshal payload failed: %v", err)
+	}
+	return string(data)
+}
+
+func (s *rtcService) scheduleTimeout(callID string) {
+	timer := time.NewTimer(s.inviteTTL)
+	defer timer.Stop()
+	<-timer.C
+
+	s.mu.Lock()
+	call, ok := s.calls[callID]
+	if !ok || call.Status != rtcCallStatusPending {
+		s.mu.Unlock()
+		return
+	}
+	call.Status = rtcCallStatusTimeout
+	notifyIDs := s.participantIDs(call)
+	for _, participantID := range notifyIDs {
+		delete(s.activeCallByID, participantID)
+	}
+	s.mu.Unlock()
+
+	logger.Info("rtc call timeout", "call_id", callID, "participant_ids", notifyIDs)
+	s.pushSystemEvent(notifyIDs, map[string]any{
+		"type":    "rtc_timeout",
+		"call_id": callID,
+	})
+}
+
+func (s *rtcService) pushInviteEvents(call *rtcCall, inviter *model.User) int {
+	successCount := 0
+	for _, inviteeID := range call.InviteeIDs {
+		payload := map[string]any{
+			"type":         "rtc_invite",
+			"call_id":      call.CallID,
+			"room_id":      call.RoomID,
+			"call_type":    call.CallType,
+			"from_user_id": call.InitiatorID,
+			"to_user_id":   inviteeID,
+			"from_name":    inviter.Name,
+			"avatar":       inviter.Avatar,
+		}
+		if call.GroupID != 0 {
+			payload["group_id"] = call.GroupID
+		}
+		payloadJSON := mustJSON(payload)
+		logger.Info("rtc invite payload", "call_id", call.CallID, "target_user_id", inviteeID, "payload", payloadJSON)
+		results := s.pushSystemEvent([]uint{inviteeID}, payload)
+		for _, result := range results {
+			logger.Info("rtc invite push result",
+				"call_id", call.CallID,
+				"target_user_id", result.UserID,
+				"online", result.Online,
+				"connection_ids", result.ConnectionIDs,
+				"successful_connection_ids", result.SuccessfulConnIDs,
+				"failed_connection_ids", result.FailedConnIDs,
+				"success", result.SuccessfulPushCount > 0,
+				"errors", result.ErrorMessages,
+			)
+			if result.SuccessfulPushCount > 0 {
+				successCount++
+			}
+		}
+	}
+	return successCount
+}
+
+// ----------RTC service 公共方法----------
+
 func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteResponse, error) {
 	callType, err := normalizeCallType(req.CallType)
 	if err != nil {
@@ -486,194 +679,4 @@ func (s *rtcService) IssueToken(userID uint, req RTCIssueTokenRequest) (*RTCToke
 		UID:    uid,
 		Token:  token.Serialize(),
 	}, nil
-}
-
-func (s *rtcService) scheduleTimeout(callID string) {
-	timer := time.NewTimer(s.inviteTTL)
-	defer timer.Stop()
-	<-timer.C
-
-	s.mu.Lock()
-	call, ok := s.calls[callID]
-	if !ok || call.Status != rtcCallStatusPending {
-		s.mu.Unlock()
-		return
-	}
-	call.Status = rtcCallStatusTimeout
-	notifyIDs := s.participantIDs(call)
-	for _, participantID := range notifyIDs {
-		delete(s.activeCallByID, participantID)
-	}
-	s.mu.Unlock()
-
-	logger.Info("rtc call timeout", "call_id", callID, "participant_ids", notifyIDs)
-	s.pushSystemEvent(notifyIDs, map[string]any{
-		"type":    "rtc_timeout",
-		"call_id": callID,
-	})
-}
-
-func (s *rtcService) pushInviteEvents(call *rtcCall, inviter *model.User) int {
-	successCount := 0
-	for _, inviteeID := range call.InviteeIDs {
-		payload := map[string]any{
-			"type":         "rtc_invite",
-			"call_id":      call.CallID,
-			"room_id":      call.RoomID,
-			"call_type":    call.CallType,
-			"from_user_id": call.InitiatorID,
-			"to_user_id":   inviteeID,
-			"from_name":    inviter.Name,
-			"avatar":       inviter.Avatar,
-		}
-		if call.GroupID != 0 {
-			payload["group_id"] = call.GroupID
-		}
-		payloadJSON := mustJSON(payload)
-		logger.Info("rtc invite payload", "call_id", call.CallID, "target_user_id", inviteeID, "payload", payloadJSON)
-		results := s.pushSystemEvent([]uint{inviteeID}, payload)
-		for _, result := range results {
-			logger.Info("rtc invite push result",
-				"call_id", call.CallID,
-				"target_user_id", result.UserID,
-				"online", result.Online,
-				"connection_ids", result.ConnectionIDs,
-				"successful_connection_ids", result.SuccessfulConnIDs,
-				"failed_connection_ids", result.FailedConnIDs,
-				"success", result.SuccessfulPushCount > 0,
-				"errors", result.ErrorMessages,
-			)
-			if result.SuccessfulPushCount > 0 {
-				successCount++
-			}
-		}
-	}
-	return successCount
-}
-
-func (s *rtcService) pushSystemEvent(userIDs []uint, payload any) []SystemPushResult {
-	if s.chatService == nil || len(userIDs) == 0 {
-		return nil
-	}
-	return s.chatService.PushSystemEvent(userIDs, payload)
-}
-
-func (s *rtcService) ensureUsersAvailable(userIDs []uint) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, userID := range userIDs {
-		if activeCallID, busy := s.activeCallByID[userID]; busy {
-			logger.Info("rtc invite conflict", "user_id", userID, "active_call_id", activeCallID)
-			return &RTCServiceError{HTTPCode: 409, Message: "目标用户忙线中"}
-		}
-	}
-	return nil
-}
-
-func (s *rtcService) connectionIDs(userID uint) []string {
-	if s.chatService == nil {
-		return nil
-	}
-	return s.chatService.GetConnectionIDs(userID)
-}
-
-func (s *rtcService) canHangup(call *rtcCall, userID uint) bool {
-	if call.InitiatorID == userID {
-		return true
-	}
-	return call.AcceptedIDs[userID]
-}
-
-func (s *rtcService) participantIDs(call *rtcCall) []uint {
-	userIDs := make([]uint, 0, len(call.InviteeIDs)+1)
-	userIDs = append(userIDs, call.InitiatorID)
-	userIDs = append(userIDs, call.InviteeIDs...)
-	return userIDs
-}
-
-func (s *rtcService) otherParticipantIDs(call *rtcCall, excludeID uint) []uint {
-	participants := s.participantIDs(call)
-	result := make([]uint, 0, len(participants))
-	for _, userID := range participants {
-		if userID == excludeID {
-			continue
-		}
-		result = append(result, userID)
-	}
-	return result
-}
-
-func (s *rtcService) nextCallIdentifiers() (string, string) {
-	seq := atomic.AddUint64(&s.sequence, 1) % 1000
-	stamp := time.Now().Format("20060102150405")
-	suffix := fmt.Sprintf("%s%03d", stamp, seq)
-	return "call_" + suffix, "rtc_room_" + suffix
-}
-
-func (s *rtcService) mapRecordError(err error, notFoundMsg, internalMsg string) error {
-	if err == nil {
-		return nil
-	}
-	if err == gorm.ErrRecordNotFound {
-		return &RTCServiceError{HTTPCode: 404, Message: notFoundMsg}
-	}
-	return &RTCServiceError{HTTPCode: 500, Message: internalMsg}
-}
-
-func normalizeCallType(callType string) (string, error) {
-	value := strings.ToLower(strings.TrimSpace(callType))
-	if value != "video" && value != "voice" {
-		return "", &RTCServiceError{HTTPCode: 400, Message: "call_type 仅支持 video 或 voice"}
-	}
-	return value, nil
-}
-
-func normalizeRejectReason(reason string) string {
-	value := strings.ToLower(strings.TrimSpace(reason))
-	if value == "busy" {
-		return "busy"
-	}
-	return "rejected"
-}
-
-func containsUint(values []uint, target uint) bool {
-	return slices.Contains(values, target)
-}
-
-func isTerminalStatus(status string) bool {
-	switch status {
-	case rtcCallStatusRejected, rtcCallStatusCanceled, rtcCallStatusEnded, rtcCallStatusTimeout:
-		return true
-	default:
-		return false
-	}
-}
-
-func loadRTCTokenLifetime(seconds int) time.Duration {
-	if seconds <= 0 {
-		return defaultRTCTokenExpire
-	}
-	return time.Duration(seconds) * time.Second
-}
-
-func (s *rtcService) releaseCall(callID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	call, ok := s.calls[callID]
-	if !ok {
-		return
-	}
-	for _, participantID := range s.participantIDs(call) {
-		delete(s.activeCallByID, participantID)
-	}
-	delete(s.calls, callID)
-	logger.Info("rtc call released", "call_id", callID)
-}
-
-func mustJSON(payload any) string {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Sprintf("marshal payload failed: %v", err)
-	}
-	return string(data)
 }

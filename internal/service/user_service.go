@@ -45,6 +45,22 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 	return &userService{userRepo: userRepo}
 }
 
+// ----------用户service 私有方法----------
+func (s *userService) generateRandomAccount(ctx context.Context) string {
+	for i := 0; i < 100; i++ {
+		account := fmt.Sprintf("%010d", rand.Intn(10000000000))
+		_, err := s.userRepo.GetByAccount(ctx, account)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return account
+		}
+		if err != nil {
+			continue
+		}
+	}
+	// Fallback: use timestamp + random suffix to guarantee uniqueness
+	return fmt.Sprintf("%010d", time.Now().UnixNano()%10000000000)
+}
+
 // ----------用户service 方法----------
 func (s *userService) Register(ctx context.Context, email, password string) (*model.User, error) {
 	account := s.generateRandomAccount(ctx)
@@ -71,21 +87,6 @@ func (s *userService) Register(ctx context.Context, email, password string) (*mo
 		return nil, err
 	}
 	return user, nil
-}
-
-func (s *userService) generateRandomAccount(ctx context.Context) string {
-	for i := 0; i < 100; i++ {
-		account := fmt.Sprintf("%010d", rand.Intn(10000000000))
-		_, err := s.userRepo.GetByAccount(ctx, account)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return account
-		}
-		if err != nil {
-			continue
-		}
-	}
-	// Fallback: use timestamp + random suffix to guarantee uniqueness
-	return fmt.Sprintf("%010d", time.Now().UnixNano()%10000000000)
 }
 
 func (s *userService) Login(ctx context.Context, account, password string) (*model.User, error) {

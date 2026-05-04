@@ -16,6 +16,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func isError(err interface{}) bool {
+	if ne, ok := err.(*net.OpError); ok {
+		if se, ok := ne.Err.(*os.SyscallError); ok {
+			errStr := strings.ToLower(se.Error())
+			return strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "connection reset by peer")
+		}
+	}
+	return false
+}
+
 func GinLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -32,16 +42,6 @@ func GinLogger() gin.HandlerFunc {
 			slog.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
 		)
 	}
-}
-
-func isError(err interface{}) bool {
-	if ne, ok := err.(*net.OpError); ok {
-		if se, ok := ne.Err.(*os.SyscallError); ok {
-			errStr := strings.ToLower(se.Error())
-			return strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "connection reset by peer")
-		}
-	}
-	return false
 }
 
 func GinRecovery() gin.HandlerFunc {

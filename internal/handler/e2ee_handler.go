@@ -35,6 +35,75 @@ func NewE2EEHandler(e2eeService service.E2EEService) *E2EEHandler {
 	return &E2EEHandler{e2eeService: e2eeService}
 }
 
+// ----------E2EE handler 工具函数----------
+func parseUintQuery(raw string) (uint, error) {
+	v, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || v == 0 {
+		return 0, fmt.Errorf("invalid uint query")
+	}
+	return uint(v), nil
+}
+
+func parseIntQuery(raw string) (int, error) {
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+func (h *E2EEHandler) getUserID(c *gin.Context) (uint, error) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, fmt.Errorf("user_id not found in context")
+	}
+	return userID.(uint), nil
+}
+
+func (h *E2EEHandler) handleGroupKeyError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrE2EEGroupPermission):
+		response.Error(c, http.StatusForbidden, "你不在该群聊中")
+	case errors.Is(err, service.ErrE2EEGroupKeyNotFound):
+		response.Error(c, http.StatusNotFound, "group key not initialized")
+	case errors.Is(err, service.ErrE2EEGroupVersionAbsent):
+		response.Error(c, http.StatusNotFound, "e2ee group key version not found")
+	case errors.Is(err, service.ErrE2EEGroupKeyBoxMissing):
+		response.Error(c, http.StatusNotFound, "e2ee group key box not found")
+	case errors.Is(err, service.ErrE2EEGroupVersionLock):
+		response.Error(c, http.StatusConflict, "e2ee group key version conflict")
+	case errors.Is(err, service.ErrE2EEGroupBoxesInvalid):
+		response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
+	default:
+		response.Error(c, http.StatusInternalServerError, "服务端异常")
+	}
+}
+
+func decodedLenBase64URLOrStd(raw string) (int, string) {
+	if raw == "" {
+		return 0, "empty"
+	}
+	if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
+		return len(decoded), ""
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		return len(decoded), ""
+	}
+	return 0, "invalid_base64"
+}
+
+func maskToken(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if len(raw) <= 12 {
+		return raw
+	}
+	return raw[:6] + "..." + raw[len(raw)-6:]
+}
+
+// ----------E2EE handler 方法----------
+
 func (h *E2EEHandler) PublishPublicKey(c *gin.Context) {
 	type publishKeyRequest struct {
 		KeyType   string `json:"key_type" binding:"required"`
@@ -235,70 +304,4 @@ func (h *E2EEHandler) GetGroupKeyByVersion(c *gin.Context) {
 		"wrap_nonce":         box.WrapNonce,
 		"wrapped_by_user_id": box.WrappedByUserID,
 	}, "ok")
-}
-
-func (h *E2EEHandler) handleGroupKeyError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrE2EEGroupPermission):
-		response.Error(c, http.StatusForbidden, "你不在该群聊中")
-	case errors.Is(err, service.ErrE2EEGroupKeyNotFound):
-		response.Error(c, http.StatusNotFound, "group key not initialized")
-	case errors.Is(err, service.ErrE2EEGroupVersionAbsent):
-		response.Error(c, http.StatusNotFound, "e2ee group key version not found")
-	case errors.Is(err, service.ErrE2EEGroupKeyBoxMissing):
-		response.Error(c, http.StatusNotFound, "e2ee group key box not found")
-	case errors.Is(err, service.ErrE2EEGroupVersionLock):
-		response.Error(c, http.StatusConflict, "e2ee group key version conflict")
-	case errors.Is(err, service.ErrE2EEGroupBoxesInvalid):
-		response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
-	default:
-		response.Error(c, http.StatusInternalServerError, "服务端异常")
-	}
-}
-
-func parseUintQuery(raw string) (uint, error) {
-	v, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil || v == 0 {
-		return 0, fmt.Errorf("invalid uint query")
-	}
-	return uint(v), nil
-}
-
-func parseIntQuery(raw string) (int, error) {
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func (h *E2EEHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
-}
-
-func decodedLenBase64URLOrStd(raw string) (int, string) {
-	if raw == "" {
-		return 0, "empty"
-	}
-	if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
-		return len(decoded), ""
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
-		return len(decoded), ""
-	}
-	return 0, "invalid_base64"
-}
-
-func maskToken(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	if len(raw) <= 12 {
-		return raw
-	}
-	return raw[:6] + "..." + raw[len(raw)-6:]
 }

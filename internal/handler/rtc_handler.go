@@ -18,6 +18,25 @@ func NewRTCHandler(rtcService service.RTCService) *RTCHandler {
 	return &RTCHandler{rtcService: rtcService}
 }
 
+// ----------RTC handler 私有方法----------
+func (h *RTCHandler) handleServiceError(c *gin.Context, err error, fallback string) {
+	if serviceErr, ok := err.(*service.RTCServiceError); ok {
+		response.Error(c, serviceErr.HTTPCode, serviceErr.Message)
+		return
+	}
+	response.Error(c, http.StatusInternalServerError, fallback)
+}
+
+func (h *RTCHandler) getUserID(c *gin.Context) (uint, error) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, fmt.Errorf("user_id not found in context")
+	}
+	return userID.(uint), nil
+}
+
+// ----------RTC handler 方法----------
+
 func (h *RTCHandler) Invite(c *gin.Context) {
 	type inviteRequest struct {
 		PeerID   uint   `json:"peer_id"`
@@ -194,20 +213,4 @@ func (h *RTCHandler) GetToken(c *gin.Context) {
 	}
 
 	response.Success(c, data, "获取 RTC Token 成功")
-}
-
-func (h *RTCHandler) handleServiceError(c *gin.Context, err error, fallback string) {
-	if serviceErr, ok := err.(*service.RTCServiceError); ok {
-		response.Error(c, serviceErr.HTTPCode, serviceErr.Message)
-		return
-	}
-	response.Error(c, http.StatusInternalServerError, fallback)
-}
-
-func (h *RTCHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
 }

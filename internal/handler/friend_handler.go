@@ -18,6 +18,15 @@ type FriendHandler struct {
 	jwtManager    *jwt.JWTManager
 }
 
+// ----------好友 handler 私有方法----------
+func (h *FriendHandler) getUserID(c *gin.Context) (uint, error) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, fmt.Errorf("user_id not found in context")
+	}
+	return userID.(uint), nil
+}
+
 // ----------好友 handler 构造函数----------
 func NewFriendHandler(friendService service.FriendService, userService service.UserService, jwtManager *jwt.JWTManager) *FriendHandler {
 	return &FriendHandler{
@@ -225,12 +234,4 @@ func (h *FriendHandler) UpdateRemark(c *gin.Context) {
 	}
 
 	response.Success(c, nil, "修改好友备注成功")
-}
-
-func (h *FriendHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
 }

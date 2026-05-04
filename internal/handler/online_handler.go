@@ -53,6 +53,62 @@ func NewOnlineHandler(chatService service.ChatService) *OnlineHandler {
 	return &OnlineHandler{chatService: chatService}
 }
 
+// ----------onlineSocketWriter 底层方法----------
+func (w *onlineSocketWriter) Write(ctx context.Context, payload onlineOutgoingMessage) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	writeCtx, cancel := context.WithTimeout(ctx, onlineWriteTimeout)
+	defer cancel()
+	return wsjson.Write(writeCtx, w.conn, payload)
+}
+
+func (w *onlineSocketWriter) Ping(ctx context.Context) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.conn.Ping(ctx)
+}
+
+// ----------OnlineHandler 私有方法----------
+func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *onlineSocketWriter, incoming onlineIncomingMessage) error {
+	userIDs := make([]uint, 0, len(incoming.UserIDs)+1)
+	if incoming.UserID > 0 {
+		userIDs = append(userIDs, incoming.UserID)
+	}
+	for _, userID := range incoming.UserIDs {
+		if userID == 0 {
+			continue
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if len(userIDs) == 0 {
+		return writer.Write(ctx, onlineOutgoingMessage{
+			Type:  "error",
+			Error: "用户ID不能为空",
+		})
+	}
+
+	statuses := make([]onlineStatus, 0, len(userIDs))
+	for _, userID := range userIDs {
+		statuses = append(statuses, onlineStatus{
+			UserID: userID,
+			Online: len(h.chatService.GetConnectionIDs(userID)) > 0,
+		})
+	}
+
+	if len(statuses) == 1 {
+		return writer.Write(ctx, onlineOutgoingMessage{
+			Type:   "online_status",
+			UserID: statuses[0].UserID,
+			Online: statuses[0].Online,
+		})
+	}
+	return writer.Write(ctx, onlineOutgoingMessage{
+		Type:     "online_status",
+		Statuses: statuses,
+	})
+}
+
+// ----------OnlineHandler 方法----------
 func (h *OnlineHandler) Connect(c *gin.Context) {
 	userIDVal, exists := c.Get("user_id")
 	if !exists {
@@ -127,57 +183,4 @@ func (h *OnlineHandler) Connect(c *gin.Context) {
 			}
 		}
 	}
-}
-
-func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *onlineSocketWriter, incoming onlineIncomingMessage) error {
-	userIDs := make([]uint, 0, len(incoming.UserIDs)+1)
-	if incoming.UserID > 0 {
-		userIDs = append(userIDs, incoming.UserID)
-	}
-	for _, userID := range incoming.UserIDs {
-		if userID == 0 {
-			continue
-		}
-		userIDs = append(userIDs, userID)
-	}
-	if len(userIDs) == 0 {
-		return writer.Write(ctx, onlineOutgoingMessage{
-			Type:  "error",
-			Error: "用户ID不能为空",
-		})
-	}
-
-	statuses := make([]onlineStatus, 0, len(userIDs))
-	for _, userID := range userIDs {
-		statuses = append(statuses, onlineStatus{
-			UserID: userID,
-			Online: len(h.chatService.GetConnectionIDs(userID)) > 0,
-		})
-	}
-
-	if len(statuses) == 1 {
-		return writer.Write(ctx, onlineOutgoingMessage{
-			Type:   "online_status",
-			UserID: statuses[0].UserID,
-			Online: statuses[0].Online,
-		})
-	}
-	return writer.Write(ctx, onlineOutgoingMessage{
-		Type:     "online_status",
-		Statuses: statuses,
-	})
-}
-
-func (w *onlineSocketWriter) Write(ctx context.Context, payload onlineOutgoingMessage) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	writeCtx, cancel := context.WithTimeout(ctx, onlineWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.conn, payload)
-}
-
-func (w *onlineSocketWriter) Ping(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.conn.Ping(ctx)
 }

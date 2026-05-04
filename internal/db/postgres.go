@@ -49,6 +49,6 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 		logger.Fatal("数据库迁移失败", slog.Any("error", err))
 	}
 
-	logger.Info("数据库连接成功")
+	logger.Info("PostgreSQL连接成功")
 	return db
 }

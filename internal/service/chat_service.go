@@ -75,6 +75,177 @@ func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupReposi
 	}
 }
 
+// ----------Chat service 工具函数----------
+func connectionIDsFromMap(connections map[string]*chatConnection) []string {
+	if len(connections) == 0 {
+		return nil
+	}
+	connectionIDs := make([]string, 0, len(connections))
+	for connectionID := range connections {
+		connectionIDs = append(connectionIDs, connectionID)
+	}
+	return connectionIDs
+}
+
+func clonePayload(payload any) (any, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var cloned any
+	err = json.Unmarshal(data, &cloned)
+	if err != nil {
+		return nil, err
+	}
+	return cloned, nil
+}
+
+func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) {
+	if redis.RedisClient == nil {
+		return
+	}
+
+	msgBytes, err := json.Marshal(message)
+	if err != nil {
+		return
+	}
+	pushKey := fmt.Sprintf("chat:push:%d", userID)
+	redis.RedisClient.RPush(context.Background(), pushKey, msgBytes)
+	redis.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
+}
+
+// drainRedisMessages 从 Redis 中拉取该用户的残留推送消息，
+// 跳过已在内存中投递过的（通过 deliveredIDs 去重），
+// 投递成功后删除 Redis 中的 key。
+func (s *chatService) drainRedisMessages(userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
+	if redis.RedisClient == nil {
+		return
+	}
+	pushKey := fmt.Sprintf("chat:push:%d", userID)
+	ctx := context.Background()
+
+	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
+	if err != nil || len(rawList) == 0 {
+		return
+	}
+
+	anyDelivered := false
+	for _, raw := range rawList {
+		var message model.ChatMessage
+		if err := json.Unmarshal([]byte(raw), &message); err != nil {
+			continue
+		}
+		if _, alreadyDelivered := deliveredIDs[message.ID]; alreadyDelivered {
+			continue
+		}
+		if err := deliver(&message, true); err != nil {
+			continue
+		}
+		deliveredIDs[message.ID] = struct{}{}
+		anyDelivered = true
+	}
+
+	if anyDelivered || len(rawList) > 0 {
+		redis.RedisClient.Del(ctx, pushKey)
+	}
+}
+
+func (s *chatService) enqueueOfflineMessage(userID uint, message *model.ChatMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.offline[userID] = append(s.offline[userID], message)
+}
+
+func (s *chatService) enqueueOfflineSystemEvent(userID uint, payload any) {
+	clonedPayload, err := clonePayload(payload)
+	if err != nil {
+		return
+	}
+
+	eventID := fmt.Sprintf("sys-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.systemOffline[userID] = append(s.systemOffline[userID], &queuedSystemEvent{
+		id:      eventID,
+		payload: clonedPayload,
+	})
+}
+
+func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
+	s.pushRedisMessage(userID, message)
+
+	s.mu.RLock()
+	userConnections := s.connections[userID]
+	connections := make([]*chatConnection, 0, len(userConnections))
+	for _, connection := range userConnections {
+		connections = append(connections, connection)
+	}
+	s.mu.RUnlock()
+
+	if len(connections) == 0 {
+		s.enqueueOfflineMessage(userID, message)
+		return
+	}
+
+	successCount := 0
+	failedConnectionIDs := make([]string, 0)
+	for _, connection := range connections {
+		err := connection.deliver(message, false)
+		if err != nil {
+			failedConnectionIDs = append(failedConnectionIDs, connection.id)
+			continue
+		}
+		successCount++
+	}
+	if len(failedConnectionIDs) > 0 {
+		s.mu.Lock()
+		if currentConnections, ok := s.connections[userID]; ok {
+			for _, connectionID := range failedConnectionIDs {
+				delete(currentConnections, connectionID)
+			}
+			if len(currentConnections) == 0 {
+				delete(s.connections, userID)
+			}
+		}
+		s.mu.Unlock()
+	}
+	if successCount == 0 {
+		s.enqueueOfflineMessage(userID, message)
+	}
+}
+
+func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
+	if s.groupRepo == nil || !s.groupRepo.IsMember(groupID, fromUserID) {
+		return nil, ErrGroupMessagePermission
+	}
+
+	members, err := s.groupRepo.GetMembersByGroupID(groupID)
+	if err != nil {
+		return nil, err
+	}
+
+	message := &model.ChatMessage{
+		ID:               fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1)),
+		ConversationType: "group",
+		FromUserID:       fromUserID,
+		GroupID:          groupID,
+		MessageType:      messageType,
+		Content:          content,
+		CreatedAt:        time.Now(),
+	}
+
+	for _, member := range members {
+		if member.UserID == fromUserID {
+			continue
+		}
+		s.deliverToUser(member.UserID, message)
+	}
+	return message, nil
+}
+
+// ----------Chat service 公共方法----------
+
 func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string {
 	connectionID := fmt.Sprintf("%d", atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
@@ -200,35 +371,6 @@ func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageTyp
 	return message, nil
 }
 
-func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
-	if s.groupRepo == nil || !s.groupRepo.IsMember(groupID, fromUserID) {
-		return nil, ErrGroupMessagePermission
-	}
-
-	members, err := s.groupRepo.GetMembersByGroupID(groupID)
-	if err != nil {
-		return nil, err
-	}
-
-	message := &model.ChatMessage{
-		ID:               fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1)),
-		ConversationType: "group",
-		FromUserID:       fromUserID,
-		GroupID:          groupID,
-		MessageType:      messageType,
-		Content:          content,
-		CreatedAt:        time.Now(),
-	}
-
-	for _, member := range members {
-		if member.UserID == fromUserID {
-			continue
-		}
-		s.deliverToUser(member.UserID, message)
-	}
-	return message, nil
-}
-
 func (s *chatService) BroadcastGroupDissolved(groupID uint, userIDs []uint) {
 	s.PushSystemEvent(userIDs, map[string]any{
 		"type":     "group_dissolved",
@@ -340,143 +482,4 @@ func (s *chatService) KickUserConnections(userID uint, reason string) {
 			conn.closeFn()
 		}
 	}
-}
-
-func (s *chatService) enqueueOfflineMessage(userID uint, message *model.ChatMessage) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.offline[userID] = append(s.offline[userID], message)
-}
-
-func (s *chatService) enqueueOfflineSystemEvent(userID uint, payload any) {
-	clonedPayload, err := clonePayload(payload)
-	if err != nil {
-		return
-	}
-
-	eventID := fmt.Sprintf("sys-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1))
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.systemOffline[userID] = append(s.systemOffline[userID], &queuedSystemEvent{
-		id:      eventID,
-		payload: clonedPayload,
-	})
-}
-
-func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
-	s.pushRedisMessage(userID, message)
-
-	s.mu.RLock()
-	userConnections := s.connections[userID]
-	connections := make([]*chatConnection, 0, len(userConnections))
-	for _, connection := range userConnections {
-		connections = append(connections, connection)
-	}
-	s.mu.RUnlock()
-
-	if len(connections) == 0 {
-		s.enqueueOfflineMessage(userID, message)
-		return
-	}
-
-	successCount := 0
-	failedConnectionIDs := make([]string, 0)
-	for _, connection := range connections {
-		err := connection.deliver(message, false)
-		if err != nil {
-			failedConnectionIDs = append(failedConnectionIDs, connection.id)
-			continue
-		}
-		successCount++
-	}
-	if len(failedConnectionIDs) > 0 {
-		s.mu.Lock()
-		if currentConnections, ok := s.connections[userID]; ok {
-			for _, connectionID := range failedConnectionIDs {
-				delete(currentConnections, connectionID)
-			}
-			if len(currentConnections) == 0 {
-				delete(s.connections, userID)
-			}
-		}
-		s.mu.Unlock()
-	}
-	if successCount == 0 {
-		s.enqueueOfflineMessage(userID, message)
-	}
-}
-
-func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) {
-	if redis.RedisClient == nil {
-		return
-	}
-
-	msgBytes, err := json.Marshal(message)
-	if err != nil {
-		return
-	}
-	pushKey := fmt.Sprintf("chat:push:%d", userID)
-	redis.RedisClient.RPush(context.Background(), pushKey, msgBytes)
-	redis.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
-}
-
-// drainRedisMessages 从 Redis 中拉取该用户的残留推送消息，
-// 跳过已在内存中投递过的（通过 deliveredIDs 去重），
-// 投递成功后删除 Redis 中的 key。
-func (s *chatService) drainRedisMessages(userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
-	if redis.RedisClient == nil {
-		return
-	}
-	pushKey := fmt.Sprintf("chat:push:%d", userID)
-	ctx := context.Background()
-
-	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
-	if err != nil || len(rawList) == 0 {
-		return
-	}
-
-	anyDelivered := false
-	for _, raw := range rawList {
-		var message model.ChatMessage
-		if err := json.Unmarshal([]byte(raw), &message); err != nil {
-			continue
-		}
-		if _, alreadyDelivered := deliveredIDs[message.ID]; alreadyDelivered {
-			continue
-		}
-		if err := deliver(&message, true); err != nil {
-			continue
-		}
-		deliveredIDs[message.ID] = struct{}{}
-		anyDelivered = true
-	}
-
-	if anyDelivered || len(rawList) > 0 {
-		redis.RedisClient.Del(ctx, pushKey)
-	}
-}
-
-func connectionIDsFromMap(connections map[string]*chatConnection) []string {
-	if len(connections) == 0 {
-		return nil
-	}
-	connectionIDs := make([]string, 0, len(connections))
-	for connectionID := range connections {
-		connectionIDs = append(connectionIDs, connectionID)
-	}
-	return connectionIDs
-}
-
-func clonePayload(payload any) (any, error) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	var cloned any
-	err = json.Unmarshal(data, &cloned)
-	if err != nil {
-		return nil, err
-	}
-	return cloned, nil
 }

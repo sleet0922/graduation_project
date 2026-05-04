@@ -24,6 +24,22 @@ type UserHandler struct {
 	refreshTokenExpiresIn time.Duration
 }
 
+// ----------用户 handler 私有方法----------
+// 生成 32 字符的随机 session ID
+func generateSessionID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, fmt.Errorf("user_id not found in context")
+	}
+	return userID.(uint), nil
+}
+
 // ----------用户 handler 构造函数----------
 func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, cfg *config.ViperConfig, chatService service.ChatService) *UserHandler {
 	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
@@ -92,13 +108,6 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 	}, "搜索用户成功")
 }
 
-func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
-}
 func (h *UserHandler) Register(c *gin.Context) {
 	type RegisterRequest struct {
 		Email    string `json:"email" binding:"required"`
@@ -189,13 +198,6 @@ func (h *UserHandler) Login(c *gin.Context) {
 			"location": user.Location,
 		},
 	}, "登录成功")
-}
-
-// 生成 32 字符的随机 session ID
-func generateSessionID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 func (h *UserHandler) RefreshToken(c *gin.Context) {
