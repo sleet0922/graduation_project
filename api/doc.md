@@ -37,8 +37,14 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 
 | 类型 | 有效期 | 用途 |
 |------|--------|------|
-| Access Token | 24h | 访问业务接口 |
-| Refresh Token | 30d | 刷新 Access Token |
+| Access Token | 24h | 访问业务接口，内含 session_id |
+| Refresh Token | 30d | 刷新 Access Token，session_id 不变 |
+
+### 多设备登录踢下线
+
+- 每次登录生成新 `session_id` 写入 Redis，旧连接被踢下线
+- WebSocket 收到 `{ "type": "kicked", "reason": "账号在其他设备登录" }` 后清 token 跳登录页
+- WebSocket 连接时若 session 失效返回 401 `"账号在其他设备登录，请重新登录"`
 
 ---
 
@@ -74,12 +80,15 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
   "refresh_token": "...",
   "expires_in": 86400,
   "refresh_expires_in": 2592000,
+  "session_id": "a1b2c3...",
   "user": {
     "id": 1, "account": "...", "name": "...", "avatar": "...",
     "email": "...", "gender": 0, "birthday": "", "location": ""
   }
 }
 ```
+
+> `session_id`: 32 位 hex 字符串，已嵌入 token 中，前端无需单独存储。新设备登录会使旧 session 失效。
 
 ---
 
@@ -412,6 +421,16 @@ wss://api.gelsomino.cn/ws/chat
 
 ---
 
+### 被踢下线（系统推送）
+
+```json
+{ "type": "kicked", "reason": "账号在其他设备登录" }
+```
+
+收到后应：清除本地 token → 提示用户 → 跳转登录页。
+
+---
+
 ### 错误
 
 ```json
@@ -419,6 +438,8 @@ wss://api.gelsomino.cn/ws/chat
 ```
 
 常见: `只能给好友发送消息` `消息内容不能为空` `接收方或群聊不能为空`
+
+WebSocket 连接失败 401: 除 token 过期外，也可能是 session 失效（`"账号在其他设备登录，请重新登录"`）。
 
 ---
 
@@ -487,7 +508,7 @@ wss://api.gelsomino.cn/ws/online
 |------|------|------|
 | group_id | uint | 是（query） |
 
-**正常返回** `{ group_id, key_version, wrapped_group_key, wrap_nonce, wrapped_by_user_id, key_wrap_alg }`
+**正常返回** `{ group_id, key_version, target_user_id, wrapped_group_key, wrap_nonce, wrapped_by_user_id, key_wrap_alg }`
 
 **若未上传密钥盒子 → 428** + `{ group_id, key_version, need_publish: true }`，提示前端调用发布接口。
 
@@ -518,6 +539,8 @@ wss://api.gelsomino.cn/ws/online
 |------|------|------|
 | group_id | uint | 是（query） |
 | key_version | int | 是（query） |
+
+**返回** `{ group_id, key_version, target_user_id, wrapped_group_key, wrap_nonce, wrapped_by_user_id }`
 
 ---
 

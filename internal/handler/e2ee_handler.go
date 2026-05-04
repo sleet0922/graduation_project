@@ -117,8 +117,8 @@ func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
 				return
 			}
 			c.JSON(428, gin.H{
-				"code":         428,
-				"message":      "e2ee group key box not found, please upload key boxes",
+				"code":    428,
+				"message": "e2ee group key box not found, please upload key boxes",
 				"data": gin.H{
 					"group_id":     groupID,
 					"key_version":  version,
@@ -135,6 +135,7 @@ func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
 	wrapNonceLen, wrapNonceDecodeErr := decodedLenBase64URLOrStd(box.WrapNonce)
 	logger.Info("e2ee group current key payload",
 		"current_user_id", currentUserID,
+		"box_user_id", box.UserID,
 		"group_id", box.GroupID,
 		"key_version", box.KeyVersion,
 		"wrapped_group_key_masked", maskToken(box.WrappedGroupKey),
@@ -153,6 +154,7 @@ func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
 	payload := gin.H{
 		"group_id":           box.GroupID,
 		"key_version":        box.KeyVersion,
+		"target_user_id":     box.UserID,
 		"wrapped_group_key":  box.WrappedGroupKey,
 		"wrap_nonce":         box.WrapNonce,
 		"wrapped_by_user_id": box.WrappedByUserID,
@@ -228,6 +230,7 @@ func (h *E2EEHandler) GetGroupKeyByVersion(c *gin.Context) {
 	response.Success(c, gin.H{
 		"group_id":           box.GroupID,
 		"key_version":        box.KeyVersion,
+		"target_user_id":     box.UserID,
 		"wrapped_group_key":  box.WrappedGroupKey,
 		"wrap_nonce":         box.WrapNonce,
 		"wrapped_by_user_id": box.WrappedByUserID,

@@ -34,18 +34,20 @@ type SystemPushResult struct {
 }
 
 type ChatService interface {
-	RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc) string
+	RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string
 	UnregisterConnection(userID uint, connectionID string)
 	SendMessage(fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error)
 	BroadcastGroupDissolved(groupID uint, userIDs []uint)
 	PushSystemEvent(userIDs []uint, payload any) []SystemPushResult
 	GetConnectionIDs(userID uint) []string
+	KickUserConnections(userID uint, reason string)
 }
 
 type chatConnection struct {
 	id         string
 	deliver    DeliveryFunc
 	sysDeliver SystemDeliveryFunc
+	closeFn    func()
 }
 
 type queuedSystemEvent struct {
@@ -73,7 +75,7 @@ func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupReposi
 	}
 }
 
-func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc) string {
+func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string {
 	connectionID := fmt.Sprintf("%d", atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
 	if s.connections[userID] == nil {
@@ -83,6 +85,7 @@ func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysD
 		id:         connectionID,
 		deliver:    deliver,
 		sysDeliver: sysDeliver,
+		closeFn:    closeConn,
 	}
 	pending := append([]*model.ChatMessage(nil), s.offline[userID]...)
 	pendingSystem := append([]*queuedSystemEvent(nil), s.systemOffline[userID]...)
@@ -297,6 +300,46 @@ func (s *chatService) GetConnectionIDs(userID uint) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return connectionIDsFromMap(s.connections[userID])
+}
+
+// KickUserConnections 踢掉指定用户的所有连接，先推送 kicked 消息再关闭
+func (s *chatService) KickUserConnections(userID uint, reason string) {
+	s.mu.Lock()
+	userConns := s.connections[userID]
+	// 先复制出所有连接信息，加锁期间只做数据提取
+	conns := make([]*chatConnection, 0, len(userConns))
+	for _, conn := range userConns {
+		conns = append(conns, conn)
+	}
+	// 从连接表中移除
+	delete(s.connections, userID)
+	s.mu.Unlock()
+
+	if len(conns) == 0 {
+		return
+	}
+
+	logger.Info("kicking user connections",
+		"user_id", userID,
+		"connection_count", len(conns),
+		"reason", reason,
+	)
+
+	kickPayload := map[string]any{
+		"type":   "kicked",
+		"reason": reason,
+	}
+
+	for _, conn := range conns {
+		// 尝试发送踢下线通知
+		if conn.sysDeliver != nil {
+			_ = conn.sysDeliver(kickPayload)
+		}
+		// 关闭连接
+		if conn.closeFn != nil {
+			conn.closeFn()
+		}
+	}
 }
 
 func (s *chatService) enqueueOfflineMessage(userID uint, message *model.ChatMessage) {

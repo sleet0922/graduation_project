@@ -22,6 +22,7 @@ type Claims struct {
 	UserID               uint   `json:"user_id"` // 用户ID
 	Account              string `json:"account"` // 用户账号
 	TokenType            string `json:"token_type"`
+	SessionID            string `json:"session_id"` // 会话ID，用于多设备踢下线
 	jwt.RegisteredClaims        // JWT标准声明（过期时间、签发时间等）
 }
 
@@ -61,10 +62,16 @@ func (j *JWTManager) GenerateRefreshToken(userID uint, account string, expiresIn
 }
 
 func (j *JWTManager) GenerateTokenWithType(userID uint, account, tokenType string, expiresIn time.Duration) (string, error) {
+	return j.GenerateTokenWithSession(userID, account, tokenType, "", expiresIn)
+}
+
+// GenerateTokenWithSession 生成带 session_id 的 token，sessionID 为空时兼容旧版
+func (j *JWTManager) GenerateTokenWithSession(userID uint, account, tokenType, sessionID string, expiresIn time.Duration) (string, error) {
 	claims := Claims{
 		UserID:    userID,
 		Account:   account,
 		TokenType: tokenType,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)), // 过期时间
 			IssuedAt:  jwt.NewNumericDate(time.Now()),                // 签发时间
@@ -117,7 +124,7 @@ func (j *JWTManager) RefreshAccessToken(refreshToken string, expiresIn time.Dura
 	if claims.TokenType != TokenTypeRefresh {
 		return "", errors.New("invalid refresh token")
 	}
-	return j.GenerateToken(claims.UserID, claims.Account, expiresIn)
+	return j.GenerateTokenWithSession(claims.UserID, claims.Account, TokenTypeAccess, claims.SessionID, expiresIn)
 }
 
 func (j *JWTManager) RotateRefreshToken(refreshToken string, expiresIn time.Duration) (string, error) {
@@ -128,5 +135,5 @@ func (j *JWTManager) RotateRefreshToken(refreshToken string, expiresIn time.Dura
 	if claims.TokenType != TokenTypeRefresh {
 		return "", errors.New("invalid refresh token")
 	}
-	return j.GenerateRefreshToken(claims.UserID, claims.Account, expiresIn)
+	return j.GenerateTokenWithSession(claims.UserID, claims.Account, TokenTypeRefresh, claims.SessionID, expiresIn)
 }

@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/jwt"
+	redisPkg "sleet0922/graduation_project/pkg/redis"
 	"sleet0922/graduation_project/pkg/response"
 	"time"
 
@@ -15,13 +18,14 @@ import (
 
 type UserHandler struct {
 	userService           service.UserService
+	chatService           service.ChatService
 	jwtManager            *jwt.JWTManager
 	accessTokenExpiresIn  time.Duration
 	refreshTokenExpiresIn time.Duration
 }
 
 // ----------用户 handler 构造函数----------
-func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, cfg *config.ViperConfig) *UserHandler {
+func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, cfg *config.ViperConfig, chatService service.ChatService) *UserHandler {
 	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
 	if accessTokenTTL <= 0 {
 		accessTokenTTL = 24 * time.Hour
@@ -33,6 +37,7 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager,
 
 	return &UserHandler{
 		userService:           userService,
+		chatService:           chatService,
 		jwtManager:            jwtManager,
 		accessTokenExpiresIn:  accessTokenTTL,
 		refreshTokenExpiresIn: refreshTokenTTL,
@@ -147,12 +152,21 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	accessToken, err := h.jwtManager.GenerateToken(user.ID, user.Account, h.accessTokenExpiresIn)
+	// 生成新的 session_id，用于多设备踢下线
+	sessionID := generateSessionID()
+	// session_id 存入 Redis，TTL 对齐 refresh_token 有效期
+	_, _ = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
+	// 踢掉该用户在其他设备的旧连接
+	if h.chatService != nil {
+		h.chatService.KickUserConnections(user.ID, "账号在其他设备登录")
+	}
+
+	accessToken, err := h.jwtManager.GenerateTokenWithSession(user.ID, user.Account, jwt.TokenTypeAccess, sessionID, h.accessTokenExpiresIn)
 	if err != nil {
 		response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 		return
 	}
-	refreshToken, err := h.jwtManager.GenerateRefreshToken(user.ID, user.Account, h.refreshTokenExpiresIn)
+	refreshToken, err := h.jwtManager.GenerateTokenWithSession(user.ID, user.Account, jwt.TokenTypeRefresh, sessionID, h.refreshTokenExpiresIn)
 	if err != nil {
 		response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 		return
@@ -163,6 +177,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 		"refresh_token":      refreshToken,
 		"expires_in":         int(h.accessTokenExpiresIn.Seconds()),
 		"refresh_expires_in": int(h.refreshTokenExpiresIn.Seconds()),
+		"session_id":         sessionID,
 		"user": gin.H{
 			"id":       user.ID,
 			"account":  user.Account,
@@ -174,6 +189,13 @@ func (h *UserHandler) Login(c *gin.Context) {
 			"location": user.Location,
 		},
 	}, "登录成功")
+}
+
+// 生成 32 字符的随机 session ID
+func generateSessionID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func (h *UserHandler) RefreshToken(c *gin.Context) {

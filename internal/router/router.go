@@ -27,8 +27,6 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	// 依赖注入
 	userRepo := repo.NewUserRepository(db)
 	userService := service.NewUserService(userRepo)
-	userHandler := handler.NewUserHandler(userService, jwtManager, cfg)
-	ossHandler := handler.NewOssHandler(cfg)
 	friendRepo := repo.NewFriendRepository(db)
 	groupRepo := repo.NewGroupRepository(db)
 	e2eeKeyRepo := repo.NewE2EEKeyRepository(db)
@@ -38,6 +36,9 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService)
 	chatService := service.NewChatService(friendRepo, groupRepo)
 	rtcService := service.NewRTCService(cfg, userRepo, friendRepo, groupRepo, chatService)
+
+	userHandler := handler.NewUserHandler(userService, jwtManager, cfg, chatService)
+	ossHandler := handler.NewOssHandler(cfg)
 
 	friendHandler := handler.NewFriendHandler(friendService, userService, jwtManager)
 	groupHandler := handler.NewGroupHandler(groupService, chatService)
@@ -51,8 +52,8 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/user/refresh", userHandler.RefreshToken)
 	r.GET("/api/oss/upload-url", jwtMiddleware.Auth(), ossHandler.GetUploadURL)
 	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
-	r.GET("/ws/chat", jwtMiddleware.Auth(), chatHandler.Connect)
-	r.GET("/ws/online", jwtMiddleware.Auth(), onlineHandler.Connect)
+	r.GET("/ws/chat", jwtMiddleware.WSAuth(), chatHandler.Connect)
+	r.GET("/ws/online", jwtMiddleware.WSAuth(), onlineHandler.Connect)
 	r.POST("/api/chat/upload/image", jwtMiddleware.Auth(), ossHandler.UploadChatImage)
 	r.POST("/api/chat/upload/video", jwtMiddleware.Auth(), ossHandler.UploadChatVideo)
 	r.POST("/api/user/avatar_update", jwtMiddleware.Auth(), userHandler.UpdateAvatar)

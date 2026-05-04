@@ -110,6 +110,8 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		}, !offline)
 	}, func(payload any) error {
 		return writer.WriteAny(ctx, payload, true)
+	}, func() {
+		cancel()
 	})
 	logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
 
