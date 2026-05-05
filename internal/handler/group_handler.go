@@ -163,7 +163,7 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 		for _, m := range members {
 			memberIDs = append(memberIDs, m.UserID)
 		}
-		h.chatService.BroadcastGroupDissolved(req.GroupID, memberIDs)
+		h.chatService.BroadcastGroupDissolved(c.Request.Context(), req.GroupID, memberIDs)
 	}
 
 	response.Success(c, nil, "删除群聊成功")

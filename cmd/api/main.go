@@ -13,18 +13,11 @@ import (
 
 func main() {
 	cfg := config.InitConfig()
-
-	// 初始化日志
 	logger.InitLogger(cfg)
-	// slog 不需要 Sync()
-	// defer logger.Log.Sync()
-
 	gin.SetMode(cfg.Server.Mode)
 	database := db.InitDB(cfg)
 	redis.InitRedis(cfg)
-
 	r := router.InitRouter(database, cfg)
-
 	logger.Info("服务器启动", slog.String("port", cfg.Server.Port))
 	err := r.Run(cfg.Server.Port)
 	if err != nil {

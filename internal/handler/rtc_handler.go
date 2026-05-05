@@ -48,7 +48,7 @@ func (h *RTCHandler) Invite(c *gin.Context) {
 		return
 	}
 
-	data, err := h.rtcService.Invite(userID, service.RTCInviteRequest{
+	data, err := h.rtcService.Invite(c.Request.Context(), userID, service.RTCInviteRequest{
 		PeerID:   req.PeerID,
 		GroupID:  req.GroupID,
 		CallType: req.CallType,
@@ -79,7 +79,7 @@ func (h *RTCHandler) Accept(c *gin.Context) {
 		return
 	}
 
-	data, err := h.rtcService.Accept(userID, service.RTCAcceptRequest{CallID: req.CallID})
+	data, err := h.rtcService.Accept(c.Request.Context(), userID, service.RTCAcceptRequest{CallID: req.CallID})
 	if err != nil {
 		h.handleServiceError(c, err, "接听失败")
 		return
@@ -107,7 +107,7 @@ func (h *RTCHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	err = h.rtcService.Reject(userID, service.RTCRejectRequest{CallID: req.CallID, Reason: req.Reason})
+	err = h.rtcService.Reject(c.Request.Context(), userID, service.RTCRejectRequest{CallID: req.CallID, Reason: req.Reason})
 	if err != nil {
 		h.handleServiceError(c, err, "拒绝失败")
 		return
@@ -134,7 +134,7 @@ func (h *RTCHandler) Cancel(c *gin.Context) {
 		return
 	}
 
-	err = h.rtcService.Cancel(userID, service.RTCCallIDRequest{CallID: req.CallID})
+	err = h.rtcService.Cancel(c.Request.Context(), userID, service.RTCCallIDRequest{CallID: req.CallID})
 	if err != nil {
 		h.handleServiceError(c, err, "取消失败")
 		return
@@ -161,7 +161,7 @@ func (h *RTCHandler) Hangup(c *gin.Context) {
 		return
 	}
 
-	err = h.rtcService.Hangup(userID, service.RTCCallIDRequest{CallID: req.CallID})
+	err = h.rtcService.Hangup(c.Request.Context(), userID, service.RTCCallIDRequest{CallID: req.CallID})
 	if err != nil {
 		h.handleServiceError(c, err, "挂断失败")
 		return
@@ -192,7 +192,7 @@ func (h *RTCHandler) GetToken(c *gin.Context) {
 		return
 	}
 
-	data, err := h.rtcService.IssueToken(userID, service.RTCIssueTokenRequest{
+	data, err := h.rtcService.IssueToken(c.Request.Context(), userID, service.RTCIssueTokenRequest{
 		CallID:   req.CallID,
 		RoomID:   req.RoomID,
 		CallType: req.CallType,

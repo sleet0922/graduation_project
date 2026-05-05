@@ -35,11 +35,11 @@ type SystemPushResult struct {
 }
 
 type ChatService interface {
-	RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string
+	RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string
 	UnregisterConnection(userID uint, connectionID string)
-	SendMessage(fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error)
-	BroadcastGroupDissolved(groupID uint, userIDs []uint)
-	PushSystemEvent(userIDs []uint, payload any) []SystemPushResult
+	SendMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error)
+	BroadcastGroupDissolved(ctx context.Context, groupID uint, userIDs []uint)
+	PushSystemEvent(ctx context.Context, userIDs []uint, payload any) []SystemPushResult
 	GetConnectionIDs(userID uint) []string
 	KickUserConnections(userID uint, reason string)
 }
@@ -103,7 +103,7 @@ func clonePayload(payload any) (any, error) {
 }
 
 // 推送到redis
-func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) {
+func (s *chatService) pushRedisMessage(ctx context.Context, userID uint, message *model.ChatMessage) {
 	if redis.RedisClient == nil {
 		return
 	}
@@ -113,17 +113,16 @@ func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) 
 		return
 	}
 	pushKey := fmt.Sprintf("chat:push:%d", userID)
-	redis.RedisClient.RPush(context.Background(), pushKey, msgBytes)
-	redis.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
+	redis.RedisClient.RPush(ctx, pushKey, msgBytes)
+	redis.RedisClient.Expire(ctx, pushKey, 3*24*time.Hour)
 }
 
 // 从redis拉取消息
-func (s *chatService) drainRedisMessages(userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
+func (s *chatService) drainRedisMessages(ctx context.Context, userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
 	if redis.RedisClient == nil {
 		return
 	}
 	pushKey := fmt.Sprintf("chat:push:%d", userID)
-	ctx := context.Background()
 	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
 	if err != nil || len(rawList) == 0 {
 		return
@@ -172,8 +171,8 @@ func (s *chatService) enqueueOfflineSystemEvent(userID uint, payload any) {
 }
 
 // 将消息投递给用户的所有连接
-func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
-	s.pushRedisMessage(userID, message)
+func (s *chatService) deliverToUser(ctx context.Context, userID uint, message *model.ChatMessage) {
+	s.pushRedisMessage(ctx, userID, message)
 	s.mu.RLock()
 	userConnections := s.connections[userID]
 	connections := make([]*chatConnection, 0, len(userConnections))
@@ -213,11 +212,11 @@ func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
 }
 
 // 发送群消息
-func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
-	if s.groupRepo == nil || !s.groupRepo.IsMember(context.Background(), groupID, fromUserID) {
+func (s *chatService) sendGroupMessage(ctx context.Context, fromUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
+	if s.groupRepo == nil || !s.groupRepo.IsMember(ctx, groupID, fromUserID) {
 		return nil, ErrGroupMessagePermission
 	}
-	members, err := s.groupRepo.GetMembersByGroupID(context.Background(), groupID)
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -234,14 +233,14 @@ func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType str
 		if member.UserID == fromUserID {
 			continue
 		}
-		s.deliverToUser(member.UserID, message)
+		s.deliverToUser(ctx, member.UserID, message)
 	}
 	return message, nil
 }
 
 // ----------公共方法----------
 // 发送好友消息
-func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string {
+func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string {
 	connectionID := fmt.Sprintf("%d", atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
 	if s.connections[userID] == nil {
@@ -312,7 +311,7 @@ func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysD
 			s.mu.Unlock()
 		}
 	}
-	s.drainRedisMessages(userID, delivered, deliver)
+	s.drainRedisMessages(ctx, userID, delivered, deliver)
 
 	return connectionID
 }
@@ -335,7 +334,7 @@ func (s *chatService) UnregisterConnection(userID uint, connectionID string) {
 }
 
 // 发送消息
-func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
+func (s *chatService) SendMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
 	if content == "" {
 		return nil, ErrMessageEmpty
 	}
@@ -343,9 +342,9 @@ func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageTyp
 		messageType = "text"
 	}
 	if groupID > 0 {
-		return s.sendGroupMessage(fromUserID, groupID, messageType, content)
+		return s.sendGroupMessage(ctx, fromUserID, groupID, messageType, content)
 	}
-	if !s.friendRepo.CheckFriendship(context.Background(), fromUserID, toUserID) {
+	if !s.friendRepo.CheckFriendship(ctx, fromUserID, toUserID) {
 		return nil, ErrMessagePermission
 	}
 	message := &model.ChatMessage{
@@ -357,20 +356,20 @@ func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageTyp
 		Content:          content,
 		CreatedAt:        time.Now(),
 	}
-	s.deliverToUser(toUserID, message)
+	s.deliverToUser(ctx, toUserID, message)
 	return message, nil
 }
 
 // 广播群解散事件
-func (s *chatService) BroadcastGroupDissolved(groupID uint, userIDs []uint) {
-	s.PushSystemEvent(userIDs, map[string]any{
+func (s *chatService) BroadcastGroupDissolved(ctx context.Context, groupID uint, userIDs []uint) {
+	s.PushSystemEvent(ctx, userIDs, map[string]any{
 		"type":     "group_dissolved",
 		"group_id": groupID,
 	})
 }
 
 // 推送系统事件
-func (s *chatService) PushSystemEvent(userIDs []uint, payload any) []SystemPushResult {
+func (s *chatService) PushSystemEvent(ctx context.Context, userIDs []uint, payload any) []SystemPushResult {
 	results := make([]SystemPushResult, 0, len(userIDs))
 	for _, userID := range userIDs {
 		s.mu.RLock()

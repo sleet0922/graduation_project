@@ -93,7 +93,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		return
 	}
 
-	connectionID := h.chatService.RegisterConnection(userID, func(message *model.ChatMessage, offline bool) error {
+	connectionID := h.chatService.RegisterConnection(ctx, userID, func(message *model.ChatMessage, offline bool) error {
 		payload := chatOutgoingMessage{
 			Type:    "chat",
 			Message: message,
@@ -153,7 +153,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			continue
 		}
 
-		message, err := h.chatService.SendMessage(userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
+		message, err := h.chatService.SendMessage(ctx, userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
 		if err != nil {
 			logger.Warn("send message failed", slog.Any("user_id", userID), slog.Any("to_user_id", incoming.ToUserID), slog.Any("group_id", incoming.GroupID), slog.Any("error", err))
 			if writeErr := writer.WriteJSON(ctx, chatOutgoingMessage{
