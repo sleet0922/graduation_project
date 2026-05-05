@@ -58,7 +58,8 @@ func NewE2EEService(keyRepo repo.E2EEKeyRepository, groupRepo repo.GroupReposito
 	}
 }
 
-// ----------E2EE service 工具函数----------
+// ----------E2EE工具函数----------
+// 解码Base64
 func decodeBase64URLOrStd(raw string) ([]byte, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("empty base64 input")
@@ -72,6 +73,7 @@ func decodeBase64URLOrStd(raw string) ([]byte, error) {
 	return nil, fmt.Errorf("invalid base64")
 }
 
+// 验证格式
 func isSupportedKeyBox(box *model.E2EEGroupKeyBox) bool {
 	if box == nil {
 		return false
@@ -83,7 +85,6 @@ func isSupportedKeyBox(box *model.E2EEGroupKeyBox) bool {
 	if err != nil {
 		return false
 	}
-	// ciphertext + tag 至少大于纯明文长度
 	if len(groupKey) <= 16 {
 		return false
 	}
@@ -91,20 +92,18 @@ func isSupportedKeyBox(box *model.E2EEGroupKeyBox) bool {
 	return err == nil && len(nonce) == 12
 }
 
-// ----------E2EE service 方法----------
-
+// ----------E2EE公共方法----------
+// 发布/更新自己的公钥
 func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, keyType, publicKey string) (*model.E2EEUserPublicKey, error) {
 	normalizedKeyType := strings.ToLower(strings.TrimSpace(keyType))
 	if normalizedKeyType != "x25519" {
 		return nil, ErrUnsupportedE2EEKeyType
 	}
-
 	normalizedPublicKey := strings.TrimSpace(publicKey)
 	decoded, err := base64.StdEncoding.DecodeString(normalizedPublicKey)
 	if err != nil || len(decoded) != 32 {
 		return nil, ErrInvalidE2EEPublicKey
 	}
-
 	record := &model.E2EEUserPublicKey{
 		UserID:    userID,
 		KeyType:   normalizedKeyType,
@@ -116,6 +115,7 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 	return s.keyRepo.GetByUserID(ctx, userID)
 }
 
+// 获取用户的公钥
 func (s *e2eeService) GetUserPublicKey(ctx context.Context, userID uint) (*model.E2EEUserPublicKey, error) {
 	key, err := s.keyRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -127,8 +127,9 @@ func (s *e2eeService) GetUserPublicKey(ctx context.Context, userID uint) (*model
 	return key, nil
 }
 
+// 获取群聊当前版本的密钥盒
 func (s *e2eeService) GetGroupCurrentKeyBox(ctx context.Context, currentUserID, groupID uint) (*model.E2EEGroupKeyBox, error) {
-	if !s.groupRepo.IsMember(groupID, currentUserID) {
+	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return nil, ErrE2EEGroupPermission
 	}
 	currentVersion, err := s.groupKeyRepo.GetCurrentVersion(ctx, groupID)
@@ -146,7 +147,6 @@ func (s *e2eeService) GetGroupCurrentKeyBox(ctx context.Context, currentUserID, 
 		return nil, err
 	}
 	if !isSupportedKeyBox(box) {
-		// 兼容旧数据：若当前版本仍为历史格式（如24字节nonce），自动轮换新版本后返回。
 		if err := s.RotateGroupKey(ctx, groupID, currentUserID); err != nil {
 			return nil, err
 		}
@@ -165,8 +165,9 @@ func (s *e2eeService) GetGroupCurrentKeyBox(ctx context.Context, currentUserID, 
 	return box, nil
 }
 
+// 获取群聊指定版本的密钥盒
 func (s *e2eeService) GetGroupKeyBoxByVersion(ctx context.Context, currentUserID, groupID uint, keyVersion int) (*model.E2EEGroupKeyBox, error) {
-	if !s.groupRepo.IsMember(groupID, currentUserID) {
+	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return nil, ErrE2EEGroupPermission
 	}
 	exists, err := s.groupKeyRepo.ExistsVersion(ctx, groupID, keyVersion)
@@ -186,12 +187,14 @@ func (s *e2eeService) GetGroupKeyBoxByVersion(ctx context.Context, currentUserID
 	return box, nil
 }
 
+// 获取群聊当前版本
 func (s *e2eeService) GetGroupCurrentVersion(ctx context.Context, groupID uint) (int, error) {
 	return s.groupKeyRepo.GetCurrentVersion(ctx, groupID)
 }
 
+// 轮转群聊密钥（生成新版本）
 func (s *e2eeService) RotateGroupKey(ctx context.Context, groupID, currentUserID uint) error {
-	members, err := s.groupRepo.GetMembersByGroupID(groupID)
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
 	if err != nil {
 		return err
 	}
@@ -202,8 +205,9 @@ func (s *e2eeService) RotateGroupKey(ctx context.Context, groupID, currentUserID
 	return err
 }
 
+// 发布群聊密钥盒
 func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, groupID uint, keyVersion int, boxes []GroupKeyBoxUpload, keyWrapAlg string) error {
-	if !s.groupRepo.IsMember(groupID, currentUserID) {
+	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return ErrE2EEGroupPermission
 	}
 	if keyVersion <= 0 || len(boxes) == 0 {
@@ -225,7 +229,7 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 	if keyVersion != currentVersion {
 		return ErrE2EEGroupVersionLock
 	}
-	members, err := s.groupRepo.GetMembersByGroupID(groupID)
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
 	if err != nil {
 		return err
 	}

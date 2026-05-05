@@ -40,9 +40,9 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	userHandler := handler.NewUserHandler(userService, jwtManager, cfg, chatService)
 	ossHandler := handler.NewOssHandler(cfg)
 
-	friendHandler := handler.NewFriendHandler(friendService, userService, jwtManager)
+	friendHandler := handler.NewFriendHandler(friendService, userService)
 	groupHandler := handler.NewGroupHandler(groupService, chatService)
-	chatHandler := handler.NewChatHandler(chatService, jwtManager)
+	chatHandler := handler.NewChatHandler(chatService)
 	onlineHandler := handler.NewOnlineHandler(chatService)
 	rtcHandler := handler.NewRTCHandler(rtcService)
 	e2eeHandler := handler.NewE2EEHandler(e2eeService)

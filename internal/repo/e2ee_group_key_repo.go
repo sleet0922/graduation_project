@@ -26,6 +26,7 @@ func NewE2EEGroupKeyRepository(db *gorm.DB) E2EEGroupKeyRepository {
 	return &e2eeGroupKeyRepository{db: db}
 }
 
+// 数据库 获取群当前密钥版本
 func (r *e2eeGroupKeyRepository) GetCurrentVersion(ctx context.Context, groupID uint) (int, error) {
 	var key model.E2EEGroupKey
 	err := r.db.WithContext(ctx).
@@ -38,6 +39,7 @@ func (r *e2eeGroupKeyRepository) GetCurrentVersion(ctx context.Context, groupID 
 	return key.KeyVersion, nil
 }
 
+// 数据库 检查指定版本是否存在
 func (r *e2eeGroupKeyRepository) ExistsVersion(ctx context.Context, groupID uint, keyVersion int) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
@@ -47,6 +49,7 @@ func (r *e2eeGroupKeyRepository) ExistsVersion(ctx context.Context, groupID uint
 	return count > 0, err
 }
 
+// 数据库 获取用户当前密钥盒
 func (r *e2eeGroupKeyRepository) GetCurrentUserKeyBox(ctx context.Context, groupID, userID uint) (*model.E2EEGroupKeyBox, error) {
 	var box model.E2EEGroupKeyBox
 	subQuery := r.db.WithContext(ctx).
@@ -62,6 +65,7 @@ func (r *e2eeGroupKeyRepository) GetCurrentUserKeyBox(ctx context.Context, group
 	return &box, nil
 }
 
+// 数据库 获取用户指定版本密钥盒
 func (r *e2eeGroupKeyRepository) GetUserKeyBoxByVersion(ctx context.Context, groupID uint, keyVersion int, userID uint) (*model.E2EEGroupKeyBox, error) {
 	var box model.E2EEGroupKeyBox
 	err := r.db.WithContext(ctx).
@@ -73,6 +77,7 @@ func (r *e2eeGroupKeyRepository) GetUserKeyBoxByVersion(ctx context.Context, gro
 	return &box, nil
 }
 
+// 数据库 创建下一版本密钥和密钥盒
 func (r *e2eeGroupKeyRepository) CreateNextVersion(ctx context.Context, groupID, createdBy uint) (*model.E2EEGroupKey, error) {
 	var createdKey *model.E2EEGroupKey
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -108,6 +113,7 @@ func (r *e2eeGroupKeyRepository) CreateNextVersion(ctx context.Context, groupID,
 	return createdKey, nil
 }
 
+// 数据库 替换指定版本的所有密钥盒
 func (r *e2eeGroupKeyRepository) ReplaceVersionBoxes(ctx context.Context, groupID uint, keyVersion int, boxes []*model.E2EEGroupKeyBox) error {
 	if len(boxes) == 0 {
 		return errors.New("empty group key boxes")

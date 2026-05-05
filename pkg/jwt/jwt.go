@@ -7,11 +7,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type ClaimsInterface interface {
-	GetUserID() uint
-	GetAccount() string
-}
-
 const (
 	TokenTypeAccess  = "access"
 	TokenTypeRefresh = "refresh"
@@ -47,10 +42,7 @@ func NewJWTManager(secretKey string) *JWTManager {
 	}
 }
 
-// ----------JWT 解析token----------
-// 传入: ctx context.Context          (上下文控制对象)
-// 传入: tokenString string           (待解析的token字符串)
-// 返回: *Claims                      (解析后的Claims结构体) / 返回: error (错误信息，成功则为nil)
+// ParseToken 解析并验证 JWT token
 func (j *JWTManager) ParseToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		return j.secretKey, nil
@@ -83,38 +75,6 @@ func (j *JWTManager) GenerateTokenWithSession(userID uint, account, tokenType, s
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(j.secretKey)
-}
-
-func (j *JWTManager) GenerateTokenWithType(userID uint, account, tokenType string, expiresIn time.Duration) (string, error) {
-	return j.GenerateTokenWithSession(userID, account, tokenType, "", expiresIn)
-}
-
-// ----------JWT 生成token（便捷方法）----------
-// GenerateToken 生成Access Token
-// 传入: userID uint                  (用户ID)
-// 传入: account string               (用户账号)
-// 传入: expiresIn time.Duration      (token有效期)
-// 返回: string                       (生成的token字符串) / 返回: error (错误信息，成功则为nil)
-func (j *JWTManager) GenerateToken(userID uint, account string, expiresIn time.Duration) (string, error) {
-	return j.GenerateTokenWithType(userID, account, TokenTypeAccess, expiresIn)
-}
-
-// GenerateRefreshToken 生成Refresh Token
-func (j *JWTManager) GenerateRefreshToken(userID uint, account string, expiresIn time.Duration) (string, error) {
-	return j.GenerateTokenWithType(userID, account, TokenTypeRefresh, expiresIn)
-}
-
-// ----------JWT 刷新token----------
-// RefreshToken 使用旧token刷新（兼容旧版，不区分token类型）
-// 传入: tokenString string           (旧的token字符串)
-// 传入: expiresIn time.Duration      (新token的有效期)
-// 返回: string                       (新生成的token字符串) / 返回: error (错误信息，成功则为nil)
-func (j *JWTManager) RefreshToken(tokenString string, expiresIn time.Duration) (string, error) {
-	claims, err := j.ParseToken(tokenString)
-	if err != nil {
-		return "", err
-	}
-	return j.GenerateToken(claims.UserID, claims.Account, expiresIn)
 }
 
 // RefreshAccessToken 使用refresh token刷新access token

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
@@ -16,14 +17,14 @@ var (
 
 // ----------好友 service 接口----------
 type FriendService interface {
-	SendFriendRequest(senderID, receiverID uint) error
-	HandleFriendRequest(userID, requestID uint, status uint) error
-	GetFriendRequestsByUserID(userID uint) ([]*model.FriendRequest, error)
-	RemoveFriend(userID, friendID uint) error
-	GetByUserID(userID uint) ([]*model.Friend, error)
-	GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error)
-	CheckFriendship(userID uint, friendID uint) bool
-	UpdateRemark(userID, friendID uint, remark string) error
+	SendFriendRequest(ctx context.Context, senderID, receiverID uint) error
+	HandleFriendRequest(ctx context.Context, userID, requestID uint, status uint) error
+	GetFriendRequestsByUserID(ctx context.Context, userID uint) ([]*model.FriendRequest, error)
+	RemoveFriend(ctx context.Context, userID, friendID uint) error
+	GetByUserID(ctx context.Context, userID uint) ([]*model.Friend, error)
+	GetFriendDetailsByUserID(ctx context.Context, userID uint) ([]*model.FriendDetail, error)
+	CheckFriendship(ctx context.Context, userID uint, friendID uint) bool
+	UpdateRemark(ctx context.Context, userID, friendID uint, remark string) error
 }
 
 // ----------好友 service 实现----------
@@ -36,17 +37,15 @@ func NewFriendService(repo repo.FriendRepository) FriendService {
 	return &friendService{friendRepo: repo}
 }
 
-// ----------好友 service 方法----------
-func (s *friendService) SendFriendRequest(senderID, receiverID uint) error {
+// 发送好友请求
+func (s *friendService) SendFriendRequest(ctx context.Context, senderID, receiverID uint) error {
 	if senderID == receiverID {
 		return ErrCannotAddSelf
 	}
-
-	if s.friendRepo.CheckFriendship(senderID, receiverID) {
+	if s.friendRepo.CheckFriendship(ctx, senderID, receiverID) {
 		return ErrAlreadyFriend
 	}
-
-	exists, err := s.friendRepo.CheckRequestExists(senderID, receiverID)
+	exists, err := s.friendRepo.CheckRequestExists(ctx, senderID, receiverID)
 	if err != nil {
 		return err
 	}
@@ -58,15 +57,16 @@ func (s *friendService) SendFriendRequest(senderID, receiverID uint) error {
 		ReceiverID: receiverID,
 		Status:     0,
 	}
-	return s.friendRepo.SendFriendRequest(friendRequest)
+	return s.friendRepo.SendFriendRequest(ctx, friendRequest)
 }
 
-func (s *friendService) HandleFriendRequest(userID, requestID uint, status uint) error {
+// 处理好友请求
+func (s *friendService) HandleFriendRequest(ctx context.Context, userID, requestID uint, status uint) error {
 	if status != 1 && status != 2 {
 		return ErrInvalidFriendRequestStatus
 	}
 
-	request, err := s.friendRepo.GetRequestByID(requestID)
+	request, err := s.friendRepo.GetRequestByID(ctx, requestID)
 	if err != nil {
 		return err
 	}
@@ -77,33 +77,39 @@ func (s *friendService) HandleFriendRequest(userID, requestID uint, status uint)
 		return nil
 	}
 	if status == 1 {
-		return s.friendRepo.AcceptFriendRequest(request)
+		return s.friendRepo.AcceptFriendRequest(ctx, request)
 	} else {
 		request.Status = status
-		return s.friendRepo.UpdateRequestStatus(request)
+		return s.friendRepo.UpdateRequestStatus(ctx, request)
 	}
 }
 
-func (s *friendService) GetFriendRequestsByUserID(userID uint) ([]*model.FriendRequest, error) {
-	return s.friendRepo.GetRequestsByReceiverID(userID)
+// 获取用户的好友请求列表
+func (s *friendService) GetFriendRequestsByUserID(ctx context.Context, userID uint) ([]*model.FriendRequest, error) {
+	return s.friendRepo.GetRequestsByReceiverID(ctx, userID)
 }
 
-func (s *friendService) RemoveFriend(userID, friendID uint) error {
-	return s.friendRepo.RemoveBothFriends(userID, friendID)
+// 删除好友
+func (s *friendService) RemoveFriend(ctx context.Context, userID, friendID uint) error {
+	return s.friendRepo.RemoveBothFriends(ctx, userID, friendID)
 }
 
-func (s *friendService) GetByUserID(userID uint) ([]*model.Friend, error) {
-	return s.friendRepo.GetByUserID(userID)
+// 根据用户ID获取好友列表
+func (s *friendService) GetByUserID(ctx context.Context, userID uint) ([]*model.Friend, error) {
+	return s.friendRepo.GetByUserID(ctx, userID)
 }
 
-func (s *friendService) GetFriendDetailsByUserID(userID uint) ([]*model.FriendDetail, error) {
-	return s.friendRepo.GetFriendDetailsByUserID(userID)
+// 根据用户ID获取好友详情列表
+func (s *friendService) GetFriendDetailsByUserID(ctx context.Context, userID uint) ([]*model.FriendDetail, error) {
+	return s.friendRepo.GetFriendDetailsByUserID(ctx, userID)
 }
 
-func (s *friendService) CheckFriendship(userID uint, friendID uint) bool {
-	return s.friendRepo.CheckFriendship(userID, friendID)
+// 检查两人好友关系
+func (s *friendService) CheckFriendship(ctx context.Context, userID uint, friendID uint) bool {
+	return s.friendRepo.CheckFriendship(ctx, userID, friendID)
 }
 
-func (s *friendService) UpdateRemark(userID, friendID uint, remark string) error {
-	return s.friendRepo.UpdateRemark(userID, friendID, remark)
+// 更新好友备注
+func (s *friendService) UpdateRemark(ctx context.Context, userID, friendID uint, remark string) error {
+	return s.friendRepo.UpdateRemark(ctx, userID, friendID, remark)
 }

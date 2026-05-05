@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"sleet0922/graduation_project/internal/model"
 
 	"gorm.io/gorm"
@@ -8,15 +9,15 @@ import (
 )
 
 type GroupRepository interface {
-	Create(group *model.ChatGroup, members []*model.ChatGroupMember) error
-	AddMembers(groupID uint, members []*model.ChatGroupMember) error
-	RemoveMember(groupID, userID uint) error
-	DeleteGroup(groupID uint) error
-	GetByID(groupID uint) (*model.ChatGroup, error)
-	GetGroupsByUserID(userID uint) ([]*model.ChatGroup, error)
-	GetMembersByGroupID(groupID uint) ([]*model.ChatGroupMember, error)
-	CountMembers(groupID uint) (int64, error)
-	IsMember(groupID, userID uint) bool
+	Create(ctx context.Context, group *model.ChatGroup, members []*model.ChatGroupMember) error
+	AddMembers(ctx context.Context, groupID uint, members []*model.ChatGroupMember) error
+	RemoveMember(ctx context.Context, groupID, userID uint) error
+	DeleteGroup(ctx context.Context, groupID uint) error
+	GetByID(ctx context.Context, groupID uint) (*model.ChatGroup, error)
+	GetGroupsByUserID(ctx context.Context, userID uint) ([]*model.ChatGroup, error)
+	GetMembersByGroupID(ctx context.Context, groupID uint) ([]*model.ChatGroupMember, error)
+	CountMembers(ctx context.Context, groupID uint) (int64, error)
+	IsMember(ctx context.Context, groupID, userID uint) bool
 }
 
 type groupRepository struct {
@@ -27,8 +28,9 @@ func NewGroupRepository(db *gorm.DB) GroupRepository {
 	return &groupRepository{db: db}
 }
 
-func (r *groupRepository) Create(group *model.ChatGroup, members []*model.ChatGroupMember) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+// 数据库 创建群聊and添加成员
+func (r *groupRepository) Create(ctx context.Context, group *model.ChatGroup, members []*model.ChatGroupMember) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Create(group).Error
 		if err != nil {
 			return err
@@ -43,11 +45,12 @@ func (r *groupRepository) Create(group *model.ChatGroup, members []*model.ChatGr
 	})
 }
 
-func (r *groupRepository) AddMembers(groupID uint, members []*model.ChatGroupMember) error {
+// 数据库 添加群成员
+func (r *groupRepository) AddMembers(ctx context.Context, groupID uint, members []*model.ChatGroupMember) error {
 	if len(members) == 0 {
 		return nil
 	}
-	return r.db.Clauses(clause.OnConflict{
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "group_id"}, {Name: "user_id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
 			"deleted_at": nil,
@@ -57,13 +60,15 @@ func (r *groupRepository) AddMembers(groupID uint, members []*model.ChatGroupMem
 	}).Create(&members).Error
 }
 
-func (r *groupRepository) RemoveMember(groupID, userID uint) error {
-	return r.db.Where("group_id = ? AND user_id = ?", groupID, userID).
+// 数据库 删除群成员
+func (r *groupRepository) RemoveMember(ctx context.Context, groupID, userID uint) error {
+	return r.db.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).
 		Delete(&model.ChatGroupMember{}).Error
 }
 
-func (r *groupRepository) DeleteGroup(groupID uint) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
+// 数据库 删除群聊and群成员
+func (r *groupRepository) DeleteGroup(ctx context.Context, groupID uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		err := tx.Where("group_id = ?", groupID).Delete(&model.ChatGroupMember{}).Error
 		if err != nil {
 			return err
@@ -72,18 +77,20 @@ func (r *groupRepository) DeleteGroup(groupID uint) error {
 	})
 }
 
-func (r *groupRepository) GetByID(groupID uint) (*model.ChatGroup, error) {
+// 数据库 ID查询群聊
+func (r *groupRepository) GetByID(ctx context.Context, groupID uint) (*model.ChatGroup, error) {
 	var group model.ChatGroup
-	err := r.db.Where("deleted_at IS NULL").First(&group, groupID).Error
+	err := r.db.WithContext(ctx).Where("deleted_at IS NULL").First(&group, groupID).Error
 	if err != nil {
 		return nil, err
 	}
 	return &group, nil
 }
 
-func (r *groupRepository) GetGroupsByUserID(userID uint) ([]*model.ChatGroup, error) {
+// 数据库 用户ID查询群聊列表
+func (r *groupRepository) GetGroupsByUserID(ctx context.Context, userID uint) ([]*model.ChatGroup, error) {
 	var groups []*model.ChatGroup
-	err := r.db.Model(&model.ChatGroup{}).
+	err := r.db.WithContext(ctx).Model(&model.ChatGroup{}).
 		Joins("JOIN chat_group_member ON chat_group_member.group_id = chat_group.id").
 		Where("chat_group_member.user_id = ? AND chat_group_member.deleted_at IS NULL AND chat_group.deleted_at IS NULL", userID).
 		Order("chat_group.updated_at desc").
@@ -91,25 +98,28 @@ func (r *groupRepository) GetGroupsByUserID(userID uint) ([]*model.ChatGroup, er
 	return groups, err
 }
 
-func (r *groupRepository) GetMembersByGroupID(groupID uint) ([]*model.ChatGroupMember, error) {
+// 数据库 群ID查询群成员列表
+func (r *groupRepository) GetMembersByGroupID(ctx context.Context, groupID uint) ([]*model.ChatGroupMember, error) {
 	var members []*model.ChatGroupMember
-	err := r.db.Where("group_id = ? AND deleted_at IS NULL", groupID).
+	err := r.db.WithContext(ctx).Where("group_id = ? AND deleted_at IS NULL", groupID).
 		Order("created_at asc").
 		Find(&members).Error
 	return members, err
 }
 
-func (r *groupRepository) CountMembers(groupID uint) (int64, error) {
+// 数据库 统计群成员数量
+func (r *groupRepository) CountMembers(ctx context.Context, groupID uint) (int64, error) {
 	var count int64
-	err := r.db.Model(&model.ChatGroupMember{}).
+	err := r.db.WithContext(ctx).Model(&model.ChatGroupMember{}).
 		Where("group_id = ? AND deleted_at IS NULL", groupID).
 		Count(&count).Error
 	return count, err
 }
 
-func (r *groupRepository) IsMember(groupID, userID uint) bool {
+// 数据库 检查用户是否是群成员
+func (r *groupRepository) IsMember(ctx context.Context, groupID, userID uint) bool {
 	var count int64
-	err := r.db.Model(&model.ChatGroupMember{}).
+	err := r.db.WithContext(ctx).Model(&model.ChatGroupMember{}).
 		Where("group_id = ? AND user_id = ? AND deleted_at IS NULL", groupID, userID).
 		Count(&count).Error
 	return err == nil && count > 0

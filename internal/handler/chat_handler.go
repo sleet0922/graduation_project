@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
-	"sleet0922/graduation_project/pkg/jwt"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -19,13 +18,10 @@ import (
 
 const (
 	chatHeartbeatInterval = 5 * time.Second
-	chatPingTimeout       = 3 * time.Second
-	chatWriteTimeout      = 5 * time.Second
 )
 
 type ChatHandler struct {
 	chatService service.ChatService
-	jwtManager  *jwt.JWTManager
 }
 
 type chatIncomingMessage struct {
@@ -45,62 +41,20 @@ type chatOutgoingMessage struct {
 	Error   string             `json:"error,omitempty"`
 }
 
-type chatSocketWriter struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
-}
-
-func NewChatHandler(chatService service.ChatService, jwtManager *jwt.JWTManager) *ChatHandler {
+// ----------ChatHandler 构造函数----------
+func NewChatHandler(chatService service.ChatService) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
-		jwtManager:  jwtManager,
 	}
-}
-
-// ----------chatSocketWriter 底层方法----------
-func (w *chatSocketWriter) Write(ctx context.Context, payload chatOutgoingMessage) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.conn, payload)
-}
-
-func (w *chatSocketWriter) Ping(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.conn.Ping(ctx)
-}
-
-func (w *chatSocketWriter) WriteAny(ctx context.Context, payload any, verifyAlive bool) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if verifyAlive {
-		pingCtx, cancel := context.WithTimeout(ctx, chatPingTimeout)
-		err := w.conn.Ping(pingCtx)
-		cancel()
-		if err != nil {
-			return err
-		}
-	}
-
-	writeCtx, cancel := context.WithTimeout(ctx, chatWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.conn, payload)
-}
-
-func (w *chatSocketWriter) WriteChat(ctx context.Context, payload chatOutgoingMessage, verifyAlive bool) error {
-	return w.WriteAny(ctx, payload, verifyAlive)
 }
 
 // ----------ChatHandler 方法----------
 func (h *ChatHandler) Connect(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	userID := userIDVal.(uint)
 
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -111,7 +65,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := &chatSocketWriter{conn: conn}
+	writer := &SocketWriter{Conn: conn}
 	go func() {
 		ticker := time.NewTicker(chatHeartbeatInterval)
 		defer ticker.Stop()
@@ -120,7 +74,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				pingCtx, pingCancel := context.WithTimeout(ctx, chatPingTimeout)
+				pingCtx, pingCancel := context.WithTimeout(ctx, wsPingTimeout)
 				err := writer.Ping(pingCtx)
 				pingCancel()
 				if err != nil {
@@ -132,7 +86,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		}
 	}()
 
-	if err := writer.Write(ctx, chatOutgoingMessage{
+	if err := writer.WriteJSON(ctx, chatOutgoingMessage{
 		Type:   "connected",
 		UserID: userID,
 	}); err != nil {
@@ -140,13 +94,17 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 	}
 
 	connectionID := h.chatService.RegisterConnection(userID, func(message *model.ChatMessage, offline bool) error {
-		return writer.WriteChat(ctx, chatOutgoingMessage{
+		payload := chatOutgoingMessage{
 			Type:    "chat",
 			Message: message,
 			Offline: offline,
-		}, !offline)
+		}
+		if offline {
+			return writer.WriteJSON(ctx, payload)
+		}
+		return writer.WriteVerified(ctx, payload)
 	}, func(payload any) error {
-		return writer.WriteAny(ctx, payload, true)
+		return writer.WriteVerified(ctx, payload)
 	}, func() {
 		cancel()
 	})
@@ -165,7 +123,15 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		}
 
 		if incoming.Type != "chat" {
-			err = writer.Write(ctx, chatOutgoingMessage{
+			// ping/pong 心跳静默处理，不需打日志或报错
+			if incoming.Type == "ping" {
+				if err := writer.WriteJSON(ctx, chatOutgoingMessage{Type: "pong"}); err != nil {
+					return
+				}
+				continue
+			}
+			logger.Warn("unsupported message type", slog.Any("user_id", userID), slog.String("type", incoming.Type))
+			err = writer.WriteJSON(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: "不支持的消息类型",
 			})
@@ -176,7 +142,8 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		}
 
 		if incoming.ToUserID == 0 && incoming.GroupID == 0 {
-			err = writer.Write(ctx, chatOutgoingMessage{
+			logger.Warn("empty receiver", slog.Any("user_id", userID))
+			err = writer.WriteJSON(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: "接收方或群聊不能为空",
 			})
@@ -188,7 +155,8 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 
 		message, err := h.chatService.SendMessage(userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
 		if err != nil {
-			if writeErr := writer.Write(ctx, chatOutgoingMessage{
+			logger.Warn("send message failed", slog.Any("user_id", userID), slog.Any("to_user_id", incoming.ToUserID), slog.Any("group_id", incoming.GroupID), slog.Any("error", err))
+			if writeErr := writer.WriteJSON(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: err.Error(),
 			}); writeErr != nil {
@@ -196,7 +164,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			}
 			continue
 		}
-		if err := writer.Write(ctx, chatOutgoingMessage{
+		if err := writer.WriteJSON(ctx, chatOutgoingMessage{
 			Type:    "sent",
 			Message: message,
 		}); err != nil {

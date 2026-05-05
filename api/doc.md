@@ -38,7 +38,7 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 | 类型 | 有效期 | 用途 |
 |------|--------|------|
 | Access Token | 24h | 访问业务接口，内含 session_id |
-| Refresh Token | 30d | 刷新 Access Token，session_id 不变 |
+| Refresh Token | 30d | 刷新时同步轮换，session_id 不变 |
 
 ### 多设备登录踢下线
 
@@ -99,6 +99,8 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 | refresh_token | string | 是 |
 
 **返回** `{ token, refresh_token, expires_in, refresh_expires_in }`
+
+> 每次刷新都会 **轮换** refresh_token（旧的立即失效），前端应替换本地存储的两个 token。
 
 ---
 
@@ -550,7 +552,7 @@ wss://api.gelsomino.cn/ws/online
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| call_type | string | 是 | `"audio"` / `"video"` |
+| call_type | string | 是 | `"voice"` / `"video"` |
 | peer_id | uint | 单聊必填 | 与 group_id 二选一 |
 | group_id | uint | 群聊必填 | 与 peer_id 二选一 |
 
@@ -602,7 +604,7 @@ wss://api.gelsomino.cn/ws/online
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | call_id | string | 是 | |
-| call_type | string | 是 | `"audio"` / `"video"` |
+| call_type | string | 是 | `"voice"` / `"video"` |
 | room_id | string | 否 | |
 | peer_id | uint | 否 | |
 | group_id | uint | 否 | |
@@ -632,8 +634,3 @@ wss://api.gelsomino.cn/ws/online
 | 10004 | Token 生成失败 |
 | 10005 | Token 解析失败 |
 | 10006 | Token 已过期 |
-| 20001 | 好友已存在 |
-| 20002 | 好友不存在 |
-| 20003 | 好友请求处理失败 |
-| 30001 | 文件上传失败 |
-| 30002 | 文件下载失败 |

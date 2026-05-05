@@ -3,7 +3,8 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"errors"
+	"log/slog"
 	"net/http"
 	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/internal/service"
@@ -32,14 +33,6 @@ func generateSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-func (h *UserHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
-}
-
 // ----------用户 handler 构造函数----------
 func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, cfg *config.ViperConfig, chatService service.ChatService) *UserHandler {
 	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
@@ -62,14 +55,14 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager,
 
 // ----------用户 handler 方法----------
 func (h *UserHandler) GetSelf(c *gin.Context) {
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 	user, err := h.userService.GetSelf(c.Request.Context(), userID)
 	if err != nil {
-		if err == service.ErrUserNotFound {
+		if errors.Is(err, service.ErrUserNotFound) {
 			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
 			return
 		}
@@ -88,7 +81,7 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 
 	user, err := h.userService.SearchUser(c.Request.Context(), keyword)
 	if err != nil {
-		if err == service.ErrUserNotFound {
+		if errors.Is(err, service.ErrUserNotFound) {
 			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
 			return
 		}
@@ -123,7 +116,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 
 	user, err := h.userService.Register(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		if err == service.ErrUserAlreadyExists {
+		if errors.Is(err, service.ErrUserAlreadyExists) {
 			response.Result(c, http.StatusOK, errcode.ErrorUserExist, nil)
 			return
 		}
@@ -153,7 +146,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	user, err := h.userService.Login(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
-		if err == service.ErrInvalidCredentials {
+		if errors.Is(err, service.ErrInvalidCredentials) {
 			response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
 			return
 		}
@@ -164,7 +157,11 @@ func (h *UserHandler) Login(c *gin.Context) {
 	// 生成新的 session_id，用于多设备踢下线
 	sessionID := generateSessionID()
 	// session_id 存入 Redis，TTL 对齐 refresh_token 有效期
-	_, _ = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
+	_, err = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
+	if err != nil {
+		// Redis 故障不应阻断登录，但需记录以便排查
+		slog.Warn("SetUserSession failed", slog.Any("user_id", user.ID), slog.Any("error", err))
+	}
 	// 踢掉该用户在其他设备的旧连接
 	if h.chatService != nil {
 		h.chatService.KickUserConnections(user.ID, "账号在其他设备登录")
@@ -243,8 +240,8 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
+	userID, err := GetUserID(c)
+	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
@@ -267,8 +264,8 @@ func (h *UserHandler) UpdateName(c *gin.Context) {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
+	userID, err := GetUserID(c)
+	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
@@ -292,18 +289,18 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
+	userID, err := GetUserID(c)
+	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 	err = h.userService.UpdatePassword(c.Request.Context(), userID, req.Password, req.NewPassword)
 	if err != nil {
-		if err == service.ErrUserNotFound {
+		if errors.Is(err, service.ErrUserNotFound) {
 			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
 			return
 		}
-		if err == service.ErrOldPasswordIncorrect {
+		if errors.Is(err, service.ErrOldPasswordIncorrect) {
 			response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
 			return
 		}
@@ -326,8 +323,8 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
+	userID, err := GetUserID(c)
+	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
@@ -345,8 +342,8 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 }
 
 func (h *UserHandler) Delete(c *gin.Context) {
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
+	userID, err := GetUserID(c)
+	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}

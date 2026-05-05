@@ -1,9 +1,11 @@
 package handler
 
 import (
-	"fmt"
+	"log/slog"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
+	"sleet0922/graduation_project/pkg/errcode"
+	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
 	"strconv"
 
@@ -13,15 +15,6 @@ import (
 type GroupHandler struct {
 	groupService service.GroupService
 	chatService  service.ChatService
-}
-
-// ----------群组 handler 私有方法----------
-func (h *GroupHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
 }
 
 func NewGroupHandler(groupService service.GroupService, chatService service.ChatService) *GroupHandler {
@@ -42,13 +35,13 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	group, err := h.groupService.CreateGroup(userID, req.Name, req.Avatar, req.MemberIDs)
+	group, err := h.groupService.CreateGroup(c.Request.Context(), userID, req.Name, req.Avatar, req.MemberIDs)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -69,13 +62,13 @@ func (h *GroupHandler) AddMembers(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	members, err := h.groupService.AddMembers(userID, req.GroupID, req.MemberIDs)
+	members, err := h.groupService.AddMembers(c.Request.Context(), userID, req.GroupID, req.MemberIDs)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -96,13 +89,13 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	err = h.groupService.RemoveMember(userID, req.GroupID, req.MemberID)
+	err = h.groupService.RemoveMember(c.Request.Context(), userID, req.GroupID, req.MemberID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -122,13 +115,13 @@ func (h *GroupHandler) Leave(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	err = h.groupService.LeaveGroup(userID, req.GroupID)
+	err = h.groupService.LeaveGroup(c.Request.Context(), userID, req.GroupID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -148,15 +141,18 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	members, _ := h.groupService.GetMembers(userID, req.GroupID)
+	members, err := h.groupService.GetMembers(c.Request.Context(), userID, req.GroupID)
+	if err != nil {
+		logger.Warn("获取群成员失败，跳过广播解散通知", slog.Any("group_id", req.GroupID), slog.Any("error", err))
+	}
 
-	err = h.groupService.DeleteGroup(userID, req.GroupID)
+	err = h.groupService.DeleteGroup(c.Request.Context(), userID, req.GroupID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -174,13 +170,13 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 }
 
 func (h *GroupHandler) GetGroups(c *gin.Context) {
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	groups, err := h.groupService.GetGroups(userID)
+	groups, err := h.groupService.GetGroups(c.Request.Context(), userID)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "获取群聊列表失败")
 		return
@@ -189,19 +185,19 @@ func (h *GroupHandler) GetGroups(c *gin.Context) {
 }
 
 func (h *GroupHandler) GetMembers(c *gin.Context) {
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	groupID, err := strconv.ParseUint(c.Query("group_id"), 10, 32)
+	groupID, err := strconv.ParseUint(c.Query("group_id"), 10, 64)
 	if err != nil || groupID == 0 {
 		response.Error(c, http.StatusBadRequest, "无效的group_id")
 		return
 	}
 
-	members, err := h.groupService.GetMembers(userID, uint(groupID))
+	members, err := h.groupService.GetMembers(c.Request.Context(), userID, uint(groupID))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return

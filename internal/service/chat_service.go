@@ -21,16 +21,17 @@ var (
 )
 
 type DeliveryFunc func(message *model.ChatMessage, offline bool) error
+
 type SystemDeliveryFunc func(payload any) error
 
 type SystemPushResult struct {
-	UserID              uint
-	Online              bool
-	ConnectionIDs       []string
-	SuccessfulConnIDs   []string
-	FailedConnIDs       []string
-	ErrorMessages       []string
-	SuccessfulPushCount int
+	UserID              uint     // 推给谁
+	Online              bool     // 用户是否在线
+	ConnectionIDs       []string // 用户所有在线连接
+	SuccessfulConnIDs   []string // 哪些连接发成功了
+	FailedConnIDs       []string // 哪些连接发失败了
+	ErrorMessages       []string // 失败原因
+	SuccessfulPushCount int      // 成功发了几条
 }
 
 type ChatService interface {
@@ -75,7 +76,7 @@ func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupReposi
 	}
 }
 
-// ----------Chat service 工具函数----------
+// 从连接map中提取连接id列表
 func connectionIDsFromMap(connections map[string]*chatConnection) []string {
 	if len(connections) == 0 {
 		return nil
@@ -87,6 +88,7 @@ func connectionIDsFromMap(connections map[string]*chatConnection) []string {
 	return connectionIDs
 }
 
+// 复制一份消息内容
 func clonePayload(payload any) (any, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -100,6 +102,7 @@ func clonePayload(payload any) (any, error) {
 	return cloned, nil
 }
 
+// 推送到redis
 func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) {
 	if redis.RedisClient == nil {
 		return
@@ -114,21 +117,17 @@ func (s *chatService) pushRedisMessage(userID uint, message *model.ChatMessage) 
 	redis.RedisClient.Expire(context.Background(), pushKey, 3*24*time.Hour)
 }
 
-// drainRedisMessages 从 Redis 中拉取该用户的残留推送消息，
-// 跳过已在内存中投递过的（通过 deliveredIDs 去重），
-// 投递成功后删除 Redis 中的 key。
+// 从redis拉取消息
 func (s *chatService) drainRedisMessages(userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
 	if redis.RedisClient == nil {
 		return
 	}
 	pushKey := fmt.Sprintf("chat:push:%d", userID)
 	ctx := context.Background()
-
 	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
 	if err != nil || len(rawList) == 0 {
 		return
 	}
-
 	anyDelivered := false
 	for _, raw := range rawList {
 		var message model.ChatMessage
@@ -144,12 +143,12 @@ func (s *chatService) drainRedisMessages(userID uint, deliveredIDs map[string]st
 		deliveredIDs[message.ID] = struct{}{}
 		anyDelivered = true
 	}
-
-	if anyDelivered || len(rawList) > 0 {
+	if anyDelivered {
 		redis.RedisClient.Del(ctx, pushKey)
 	}
 }
 
+// 将消息加入内存离线队列
 func (s *chatService) enqueueOfflineMessage(userID uint, message *model.ChatMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,12 +156,12 @@ func (s *chatService) enqueueOfflineMessage(userID uint, message *model.ChatMess
 	s.offline[userID] = append(s.offline[userID], message)
 }
 
+// 将系统事件加入内存离线队列
 func (s *chatService) enqueueOfflineSystemEvent(userID uint, payload any) {
 	clonedPayload, err := clonePayload(payload)
 	if err != nil {
 		return
 	}
-
 	eventID := fmt.Sprintf("sys-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,9 +171,9 @@ func (s *chatService) enqueueOfflineSystemEvent(userID uint, payload any) {
 	})
 }
 
+// 将消息投递给用户的所有连接
 func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
 	s.pushRedisMessage(userID, message)
-
 	s.mu.RLock()
 	userConnections := s.connections[userID]
 	connections := make([]*chatConnection, 0, len(userConnections))
@@ -182,12 +181,10 @@ func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
 		connections = append(connections, connection)
 	}
 	s.mu.RUnlock()
-
 	if len(connections) == 0 {
 		s.enqueueOfflineMessage(userID, message)
 		return
 	}
-
 	successCount := 0
 	failedConnectionIDs := make([]string, 0)
 	for _, connection := range connections {
@@ -215,16 +212,15 @@ func (s *chatService) deliverToUser(userID uint, message *model.ChatMessage) {
 	}
 }
 
+// 发送群消息
 func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
-	if s.groupRepo == nil || !s.groupRepo.IsMember(groupID, fromUserID) {
+	if s.groupRepo == nil || !s.groupRepo.IsMember(context.Background(), groupID, fromUserID) {
 		return nil, ErrGroupMessagePermission
 	}
-
-	members, err := s.groupRepo.GetMembersByGroupID(groupID)
+	members, err := s.groupRepo.GetMembersByGroupID(context.Background(), groupID)
 	if err != nil {
 		return nil, err
 	}
-
 	message := &model.ChatMessage{
 		ID:               fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1)),
 		ConversationType: "group",
@@ -234,7 +230,6 @@ func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType str
 		Content:          content,
 		CreatedAt:        time.Now(),
 	}
-
 	for _, member := range members {
 		if member.UserID == fromUserID {
 			continue
@@ -244,8 +239,8 @@ func (s *chatService) sendGroupMessage(fromUserID, groupID uint, messageType str
 	return message, nil
 }
 
-// ----------Chat service 公共方法----------
-
+// ----------公共方法----------
+// 发送好友消息
 func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string {
 	connectionID := fmt.Sprintf("%d", atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
@@ -263,8 +258,6 @@ func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysD
 	connectionIDs := connectionIDsFromMap(s.connections[userID])
 	s.mu.Unlock()
 	logger.Info("websocket connection registered", "user_id", userID, "connection_ids", connectionIDs, "connection_count", len(connectionIDs))
-
-	// 投递内存中的离线消息
 	delivered := make(map[string]struct{}, len(pending))
 	if len(pending) > 0 {
 		for _, message := range pending {
@@ -289,8 +282,6 @@ func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysD
 			s.mu.Unlock()
 		}
 	}
-
-	// 投递内存中的系统事件
 	if len(pendingSystem) > 0 && sysDeliver != nil {
 		deliveredSystem := make(map[string]struct{}, len(pendingSystem))
 		for _, event := range pendingSystem {
@@ -321,14 +312,12 @@ func (s *chatService) RegisterConnection(userID uint, deliver DeliveryFunc, sysD
 			s.mu.Unlock()
 		}
 	}
-
-	// 服务重启后内存离线队列会丢失，但 Redis 中仍有残留消息。
-	// 连接建立后将 Redis 中的消息也投递出去并清理，避免消息丢失。
 	s.drainRedisMessages(userID, delivered, deliver)
 
 	return connectionID
 }
 
+// 注销连接
 func (s *chatService) UnregisterConnection(userID uint, connectionID string) {
 	s.mu.Lock()
 	userConnections, ok := s.connections[userID]
@@ -345,6 +334,7 @@ func (s *chatService) UnregisterConnection(userID uint, connectionID string) {
 	logger.Info("websocket connection unregistered", "user_id", userID, "connection_id", connectionID, "remaining_connection_ids", connectionIDs, "connection_count", len(connectionIDs))
 }
 
+// 发送消息
 func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
 	if content == "" {
 		return nil, ErrMessageEmpty
@@ -355,7 +345,7 @@ func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageTyp
 	if groupID > 0 {
 		return s.sendGroupMessage(fromUserID, groupID, messageType, content)
 	}
-	if !s.friendRepo.CheckFriendship(fromUserID, toUserID) {
+	if !s.friendRepo.CheckFriendship(context.Background(), fromUserID, toUserID) {
 		return nil, ErrMessagePermission
 	}
 	message := &model.ChatMessage{
@@ -371,6 +361,7 @@ func (s *chatService) SendMessage(fromUserID, toUserID, groupID uint, messageTyp
 	return message, nil
 }
 
+// 广播群解散事件
 func (s *chatService) BroadcastGroupDissolved(groupID uint, userIDs []uint) {
 	s.PushSystemEvent(userIDs, map[string]any{
 		"type":     "group_dissolved",
@@ -378,6 +369,7 @@ func (s *chatService) BroadcastGroupDissolved(groupID uint, userIDs []uint) {
 	})
 }
 
+// 推送系统事件
 func (s *chatService) PushSystemEvent(userIDs []uint, payload any) []SystemPushResult {
 	results := make([]SystemPushResult, 0, len(userIDs))
 	for _, userID := range userIDs {
@@ -438,46 +430,41 @@ func (s *chatService) PushSystemEvent(userIDs []uint, payload any) []SystemPushR
 	return results
 }
 
+// 获取用户的连接ID列表
 func (s *chatService) GetConnectionIDs(userID uint) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return connectionIDsFromMap(s.connections[userID])
 }
 
-// KickUserConnections 踢掉指定用户的所有连接，先推送 kicked 消息再关闭
+// 踢掉指定用户的所有连接，先推送kicked消息再关闭
 func (s *chatService) KickUserConnections(userID uint, reason string) {
 	s.mu.Lock()
 	userConns := s.connections[userID]
-	// 先复制出所有连接信息，加锁期间只做数据提取
 	conns := make([]*chatConnection, 0, len(userConns))
 	for _, conn := range userConns {
 		conns = append(conns, conn)
 	}
-	// 从连接表中移除
 	delete(s.connections, userID)
+	delete(s.offline, userID)
+	delete(s.systemOffline, userID)
 	s.mu.Unlock()
-
 	if len(conns) == 0 {
 		return
 	}
-
 	logger.Info("kicking user connections",
 		"user_id", userID,
 		"connection_count", len(conns),
 		"reason", reason,
 	)
-
 	kickPayload := map[string]any{
 		"type":   "kicked",
 		"reason": reason,
 	}
-
 	for _, conn := range conns {
-		// 尝试发送踢下线通知
 		if conn.sysDeliver != nil {
 			_ = conn.sysDeliver(kickPayload)
 		}
-		// 关闭连接
 		if conn.closeFn != nil {
 			conn.closeFn()
 		}

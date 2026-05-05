@@ -30,7 +30,7 @@ func GinLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
+		query := maskTokenInQuery(c.Request.URL.RawQuery)
 		c.Next()
 		cost := time.Since(start)
 		logger.Info(path,
@@ -42,6 +42,23 @@ func GinLogger() gin.HandlerFunc {
 			slog.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
 		)
 	}
+}
+
+// maskTokenInQuery 脱敏 query 中的 token 参数，避免泄露到日志
+func maskTokenInQuery(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	// 简单策略：如果包含 token=，将其后的值替换为 ***
+	i := strings.Index(raw, "token=")
+	if i == -1 {
+		return raw
+	}
+	end := strings.Index(raw[i:], "&")
+	if end == -1 {
+		return raw[:i+6] + "***"
+	}
+	return raw[:i+6] + "***" + raw[i+end:]
 }
 
 func GinRecovery() gin.HandlerFunc {

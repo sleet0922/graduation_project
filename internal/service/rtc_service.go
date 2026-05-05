@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -23,7 +24,6 @@ import (
 const (
 	defaultRTCTokenExpire = 2 * time.Hour
 	defaultRTCInviteTTL   = 45 * time.Second
-
 	rtcCallStatusPending  = "pending"
 	rtcCallStatusOngoing  = "ongoing"
 	rtcCallStatusRejected = "rejected"
@@ -141,7 +141,8 @@ func NewRTCService(cfg *config.ViperConfig, userRepo repo.UserRepository, friend
 	}
 }
 
-// ----------RTC service 工具函数----------
+// ----------RTC工具函数----------
+// 推送系统事件给指定用户ID列表，返回每个用户的推送结果
 func (s *rtcService) pushSystemEvent(userIDs []uint, payload any) []SystemPushResult {
 	if s.chatService == nil || len(userIDs) == 0 {
 		return nil
@@ -149,6 +150,7 @@ func (s *rtcService) pushSystemEvent(userIDs []uint, payload any) []SystemPushRe
 	return s.chatService.PushSystemEvent(userIDs, payload)
 }
 
+// 检查用户是否有正在进行的通话
 func (s *rtcService) ensureUsersAvailable(userIDs []uint) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -161,6 +163,7 @@ func (s *rtcService) ensureUsersAvailable(userIDs []uint) error {
 	return nil
 }
 
+// 获取用户的连接ID列表
 func (s *rtcService) connectionIDs(userID uint) []string {
 	if s.chatService == nil {
 		return nil
@@ -168,6 +171,7 @@ func (s *rtcService) connectionIDs(userID uint) []string {
 	return s.chatService.GetConnectionIDs(userID)
 }
 
+// 检查用户是否有权限操作通话
 func (s *rtcService) canHangup(call *rtcCall, userID uint) bool {
 	if call.InitiatorID == userID {
 		return true
@@ -175,6 +179,7 @@ func (s *rtcService) canHangup(call *rtcCall, userID uint) bool {
 	return call.AcceptedIDs[userID]
 }
 
+// 获取通话的所有参与者ID列表
 func (s *rtcService) participantIDs(call *rtcCall) []uint {
 	userIDs := make([]uint, 0, len(call.InviteeIDs)+1)
 	userIDs = append(userIDs, call.InitiatorID)
@@ -182,6 +187,7 @@ func (s *rtcService) participantIDs(call *rtcCall) []uint {
 	return userIDs
 }
 
+// 获取通话的其他参与者ID列表
 func (s *rtcService) otherParticipantIDs(call *rtcCall, excludeID uint) []uint {
 	participants := s.participantIDs(call)
 	result := make([]uint, 0, len(participants))
@@ -194,6 +200,7 @@ func (s *rtcService) otherParticipantIDs(call *rtcCall, excludeID uint) []uint {
 	return result
 }
 
+// 生成新的通话ID和房间ID
 func (s *rtcService) nextCallIdentifiers() (string, string) {
 	seq := atomic.AddUint64(&s.sequence, 1) % 1000
 	stamp := time.Now().Format("20060102150405")
@@ -201,16 +208,18 @@ func (s *rtcService) nextCallIdentifiers() (string, string) {
 	return "call_" + suffix, "rtc_room_" + suffix
 }
 
+// 将数据库查询错误映射为RTCServiceError
 func (s *rtcService) mapRecordError(err error, notFoundMsg, internalMsg string) error {
 	if err == nil {
 		return nil
 	}
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &RTCServiceError{HTTPCode: 404, Message: notFoundMsg}
 	}
 	return &RTCServiceError{HTTPCode: 500, Message: internalMsg}
 }
 
+// 规范化呼叫类型参数
 func normalizeCallType(callType string) (string, error) {
 	value := strings.ToLower(strings.TrimSpace(callType))
 	if value != "video" && value != "voice" {
@@ -219,6 +228,7 @@ func normalizeCallType(callType string) (string, error) {
 	return value, nil
 }
 
+// 规范化拒绝原因参数
 func normalizeRejectReason(reason string) string {
 	value := strings.ToLower(strings.TrimSpace(reason))
 	if value == "busy" {
@@ -227,10 +237,12 @@ func normalizeRejectReason(reason string) string {
 	return "rejected"
 }
 
+// 检查是否为支持的密钥盒格式
 func containsUint(values []uint, target uint) bool {
 	return slices.Contains(values, target)
 }
 
+// 检查是否为支持的密钥盒格式
 func isTerminalStatus(status string) bool {
 	switch status {
 	case rtcCallStatusRejected, rtcCallStatusCanceled, rtcCallStatusEnded, rtcCallStatusTimeout:
@@ -240,6 +252,7 @@ func isTerminalStatus(status string) bool {
 	}
 }
 
+// 规范化成员ID列表
 func loadRTCTokenLifetime(seconds int) time.Duration {
 	if seconds <= 0 {
 		return defaultRTCTokenExpire
@@ -247,6 +260,7 @@ func loadRTCTokenLifetime(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+// 规范化成员ID列表
 func (s *rtcService) releaseCall(callID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -261,6 +275,7 @@ func (s *rtcService) releaseCall(callID string) {
 	logger.Info("rtc call released", "call_id", callID)
 }
 
+// 规范化成员ID列表
 func mustJSON(payload any) string {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -269,6 +284,7 @@ func mustJSON(payload any) string {
 	return string(data)
 }
 
+// 规范化成员ID列表
 func (s *rtcService) scheduleTimeout(callID string) {
 	timer := time.NewTimer(s.inviteTTL)
 	defer timer.Stop()
@@ -294,6 +310,7 @@ func (s *rtcService) scheduleTimeout(callID string) {
 	})
 }
 
+// 发送好友请求
 func (s *rtcService) pushInviteEvents(call *rtcCall, inviter *model.User) int {
 	successCount := 0
 	for _, inviteeID := range call.InviteeIDs {
@@ -332,8 +349,8 @@ func (s *rtcService) pushInviteEvents(call *rtcCall, inviter *model.User) int {
 	return successCount
 }
 
-// ----------RTC service 公共方法----------
-
+// ----------RTC公共方法----------
+// 生成RTC Token
 func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteResponse, error) {
 	callType, err := normalizeCallType(req.CallType)
 	if err != nil {
@@ -342,12 +359,10 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 	if (req.PeerID == 0 && req.GroupID == 0) || (req.PeerID != 0 && req.GroupID != 0) {
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "peer_id 和 group_id 必须二选一"}
 	}
-
 	inviter, err := s.userRepo.GetByID(context.Background(), userID)
 	if err != nil {
 		return nil, s.mapRecordError(err, "用户不存在", "获取用户信息失败")
 	}
-
 	var inviteeIDs []uint
 	if req.PeerID != 0 {
 		if req.PeerID == userID {
@@ -356,7 +371,7 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 		if _, err := s.userRepo.GetByID(context.Background(), req.PeerID); err != nil {
 			return nil, s.mapRecordError(err, "呼叫对象不存在", "校验呼叫对象失败")
 		}
-		if !s.friendRepo.CheckFriendship(userID, req.PeerID) {
+		if !s.friendRepo.CheckFriendship(context.Background(), userID, req.PeerID) {
 			return nil, &RTCServiceError{HTTPCode: 403, Message: "无权限发起该通话"}
 		}
 		targetConnIDs := s.connectionIDs(req.PeerID)
@@ -366,17 +381,17 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 		}
 		inviteeIDs = []uint{req.PeerID}
 	} else {
-		group, err := s.groupRepo.GetByID(req.GroupID)
+		group, err := s.groupRepo.GetByID(context.Background(), req.GroupID)
 		if err != nil {
 			return nil, s.mapRecordError(err, "群聊不存在", "校验群聊失败")
 		}
 		if group == nil {
 			return nil, &RTCServiceError{HTTPCode: 404, Message: "群聊不存在"}
 		}
-		if !s.groupRepo.IsMember(req.GroupID, userID) {
+		if !s.groupRepo.IsMember(context.Background(), req.GroupID, userID) {
 			return nil, &RTCServiceError{HTTPCode: 403, Message: "无权限发起该通话"}
 		}
-		members, err := s.groupRepo.GetMembersByGroupID(req.GroupID)
+		members, err := s.groupRepo.GetMembersByGroupID(context.Background(), req.GroupID)
 		if err != nil {
 			return nil, &RTCServiceError{HTTPCode: 500, Message: "获取群成员失败"}
 		}
@@ -396,12 +411,10 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 			return nil, &RTCServiceError{HTTPCode: 409, Message: "群聊当前没有在线成员"}
 		}
 	}
-
 	err = s.ensureUsersAvailable(append([]uint{userID}, inviteeIDs...))
 	if err != nil {
 		return nil, err
 	}
-
 	callID, roomID := s.nextCallIdentifiers()
 	call := &rtcCall{
 		CallID:      callID,
@@ -416,14 +429,12 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 		Status:      rtcCallStatusPending,
 		CreatedAt:   time.Now(),
 	}
-
 	s.mu.Lock()
 	s.calls[callID] = call
 	for _, busyUserID := range append([]uint{userID}, inviteeIDs...) {
 		s.activeCallByID[busyUserID] = callID
 	}
 	s.mu.Unlock()
-
 	invitePayload := &RTCInviteResponse{
 		CallID:   callID,
 		RoomID:   roomID,
@@ -445,12 +456,12 @@ func (s *rtcService) Invite(userID uint, req RTCInviteRequest) (*RTCInviteRespon
 	return invitePayload, nil
 }
 
+// 接受通话邀请
 func (s *rtcService) Accept(userID uint, req RTCAcceptRequest) (*RTCCallActionResponse, error) {
 	callID := strings.TrimSpace(req.CallID)
 	if callID == "" {
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "call_id 不能为空"}
 	}
-
 	s.mu.Lock()
 	call, ok := s.calls[callID]
 	if !ok {
@@ -477,17 +488,16 @@ func (s *rtcService) Accept(userID uint, req RTCAcceptRequest) (*RTCCallActionRe
 	roomID := call.RoomID
 	notifyIDs := s.otherParticipantIDs(call, userID)
 	s.mu.Unlock()
-
 	logger.Info("rtc call accepted", "call_id", callID, "user_id", userID, "room_id", roomID)
 	s.pushSystemEvent(notifyIDs, map[string]any{
 		"type":    "rtc_accept",
 		"call_id": callID,
 		"room_id": roomID,
 	})
-
 	return &RTCCallActionResponse{CallID: callID, RoomID: roomID}, nil
 }
 
+// 拒绝通话邀请
 func (s *rtcService) Reject(userID uint, req RTCRejectRequest) error {
 	callID := strings.TrimSpace(req.CallID)
 	if callID == "" {
@@ -516,7 +526,6 @@ func (s *rtcService) Reject(userID uint, req RTCRejectRequest) error {
 
 	call.RejectedIDs[userID] = reason
 	delete(s.activeCallByID, userID)
-
 	notifyInitiator := []uint{call.InitiatorID}
 	shouldReleaseAll := len(call.RejectedIDs) == len(call.InviteeIDs)
 	if shouldReleaseAll {
@@ -526,7 +535,6 @@ func (s *rtcService) Reject(userID uint, req RTCRejectRequest) error {
 		}
 	}
 	s.mu.Unlock()
-
 	eventType := "rtc_reject"
 	if reason == "busy" {
 		eventType = "rtc_busy"
@@ -540,12 +548,12 @@ func (s *rtcService) Reject(userID uint, req RTCRejectRequest) error {
 	return nil
 }
 
+// 取消通话
 func (s *rtcService) Cancel(userID uint, req RTCCallIDRequest) error {
 	callID := strings.TrimSpace(req.CallID)
 	if callID == "" {
 		return &RTCServiceError{HTTPCode: 400, Message: "call_id 不能为空"}
 	}
-
 	s.mu.Lock()
 	call, ok := s.calls[callID]
 	if !ok {
@@ -575,6 +583,7 @@ func (s *rtcService) Cancel(userID uint, req RTCCallIDRequest) error {
 	return nil
 }
 
+// 挂断通话
 func (s *rtcService) Hangup(userID uint, req RTCCallIDRequest) error {
 	callID := strings.TrimSpace(req.CallID)
 	if callID == "" {
@@ -614,6 +623,7 @@ func (s *rtcService) Hangup(userID uint, req RTCCallIDRequest) error {
 	return nil
 }
 
+// 生成RTC Token
 func (s *rtcService) IssueToken(userID uint, req RTCIssueTokenRequest) (*RTCTokenPayload, error) {
 	callType, err := normalizeCallType(req.CallType)
 	if err != nil {
@@ -651,7 +661,6 @@ func (s *rtcService) IssueToken(userID uint, req RTCIssueTokenRequest) (*RTCToke
 	storedGroupID := call.GroupID
 	status := call.Status
 	s.mu.RUnlock()
-
 	if callType != storedType {
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "call_type 与当前通话不一致"}
 	}
@@ -664,7 +673,6 @@ func (s *rtcService) IssueToken(userID uint, req RTCIssueTokenRequest) (*RTCToke
 	if storedGroupID != 0 && req.GroupID != 0 && storedGroupID != req.GroupID {
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "group_id 与当前通话不一致"}
 	}
-
 	uid := strconv.FormatUint(uint64(userID), 10)
 	expireAt := time.Now().Add(s.tokenLifetime)
 	token := rtc.NewAccessToken(s.appID, s.appKey, roomID, uid)
@@ -672,7 +680,6 @@ func (s *rtcService) IssueToken(userID uint, req RTCIssueTokenRequest) (*RTCToke
 	token.AddPrivilege(rtc.PrivSubscribeStream, expireAt)
 	token.AddPrivilege(rtc.PrivPublishStream, expireAt)
 	logger.Info("rtc token issued", "call_id", callID, "user_id", userID, "room_id", roomID, "call_status", status)
-
 	return &RTCTokenPayload{
 		AppID:  s.appID,
 		RoomID: roomID,

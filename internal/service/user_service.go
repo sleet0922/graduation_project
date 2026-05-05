@@ -2,16 +2,17 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
+	"strings"
+
+	"gorm.io/gorm"
+
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/security"
-	"strings"
-	"time"
-
-	"gorm.io/gorm"
 )
 
 var (
@@ -45,25 +46,16 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 	return &userService{userRepo: userRepo}
 }
 
-// ----------用户service 私有方法----------
-func (s *userService) generateRandomAccount(ctx context.Context) string {
-	for i := 0; i < 100; i++ {
-		account := fmt.Sprintf("%010d", rand.Intn(10000000000))
-		_, err := s.userRepo.GetByAccount(ctx, account)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return account
-		}
-		if err != nil {
-			continue
-		}
-	}
-	// Fallback: use timestamp + random suffix to guarantee uniqueness
-	return fmt.Sprintf("%010d", time.Now().UnixNano()%10000000000)
+// 生成随机账号
+func (s *userService) generateRandomAccount() string {
+	prefix, _ := rand.Int(rand.Reader, big.NewInt(9))
+	suffix, _ := rand.Int(rand.Reader, big.NewInt(1000000000))
+	return fmt.Sprintf("%d%09d", prefix.Int64()+1, suffix.Int64())
 }
 
-// ----------用户service 方法----------
+// 用户注册
 func (s *userService) Register(ctx context.Context, email, password string) (*model.User, error) {
-	account := s.generateRandomAccount(ctx)
+	account := s.generateRandomAccount()
 	_, err := s.userRepo.GetByEmail(ctx, email)
 	if err == nil {
 		return nil, ErrUserAlreadyExists
@@ -71,7 +63,6 @@ func (s *userService) Register(ctx context.Context, email, password string) (*mo
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-
 	hashedPassword, err := security.HashPassword(password)
 	if err != nil {
 		return nil, err
@@ -89,11 +80,10 @@ func (s *userService) Register(ctx context.Context, email, password string) (*mo
 	return user, nil
 }
 
+// 用户登录
 func (s *userService) Login(ctx context.Context, account, password string) (*model.User, error) {
 	var user *model.User
 	var err error
-
-	// 判断是邮箱还是账号登录
 	if strings.Contains(account, "@") {
 		user, err = s.userRepo.GetByEmail(ctx, account)
 	} else {
@@ -114,6 +104,7 @@ func (s *userService) Login(ctx context.Context, account, password string) (*mod
 	return user, nil
 }
 
+// 用户搜索
 func (s *userService) SearchUser(ctx context.Context, keyword string) (*model.User, error) {
 	if strings.Contains(keyword, "@") {
 		user, err := s.userRepo.GetByEmail(ctx, keyword)
@@ -129,6 +120,7 @@ func (s *userService) SearchUser(ctx context.Context, keyword string) (*model.Us
 	return user, err
 }
 
+// 用户ID查询
 func (s *userService) GetByID(ctx context.Context, id uint) (*model.User, error) {
 	user, err := s.userRepo.GetByID(ctx, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -137,14 +129,17 @@ func (s *userService) GetByID(ctx context.Context, id uint) (*model.User, error)
 	return user, err
 }
 
+// 更新头像、昵称、密码、个人资料等信息
 func (s *userService) UpdateAvatar(ctx context.Context, userID uint, avatar string) (*model.User, error) {
 	return s.userRepo.UpdateAvatar(ctx, userID, avatar)
 }
 
+// 更新name
 func (s *userService) UpdateName(ctx context.Context, userID uint, name string) (*model.User, error) {
 	return s.userRepo.UpdateName(ctx, userID, name)
 }
 
+// 更新密码
 func (s *userService) UpdatePassword(ctx context.Context, userID uint, oldPassword, newPassword string) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -165,10 +160,12 @@ func (s *userService) UpdatePassword(ctx context.Context, userID uint, oldPasswo
 	return err
 }
 
+// 更新个人资料
 func (s *userService) UpdateProfile(ctx context.Context, userID uint, gender int, birthday string, location string) (*model.User, error) {
 	return s.userRepo.UpdateProfile(ctx, userID, gender, birthday, location)
 }
 
+// 获取用户自己信息
 func (s *userService) GetSelf(ctx context.Context, userID uint) (*model.User, error) {
 	user, err := s.userRepo.GetSelf(ctx, userID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -177,6 +174,7 @@ func (s *userService) GetSelf(ctx context.Context, userID uint) (*model.User, er
 	return user, err
 }
 
+// 用户删除
 func (s *userService) Delete(ctx context.Context, userID uint) error {
 	return s.userRepo.Delete(ctx, userID)
 }

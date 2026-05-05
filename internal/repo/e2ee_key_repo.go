@@ -21,6 +21,7 @@ func NewE2EEKeyRepository(db *gorm.DB) E2EEKeyRepository {
 	return &e2eeKeyRepository{db: db}
 }
 
+// 数据库 插入或更新公钥
 func (r *e2eeKeyRepository) Upsert(ctx context.Context, key *model.E2EEUserPublicKey) error {
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
@@ -30,6 +31,7 @@ func (r *e2eeKeyRepository) Upsert(ctx context.Context, key *model.E2EEUserPubli
 		Create(key).Error
 }
 
+// 数据库 根据用户ID查询公钥
 func (r *e2eeKeyRepository) GetByUserID(ctx context.Context, userID uint) (*model.E2EEUserPublicKey, error) {
 	var key model.E2EEUserPublicKey
 	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&key).Error

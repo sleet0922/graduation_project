@@ -22,13 +22,13 @@ var (
 )
 
 type GroupService interface {
-	CreateGroup(ownerID uint, name, avatar string, memberIDs []uint) (*model.ChatGroupDetail, error)
-	AddMembers(operatorID, groupID uint, memberIDs []uint) ([]*model.ChatGroupMemberDetail, error)
-	RemoveMember(operatorID, groupID, memberID uint) error
-	LeaveGroup(userID, groupID uint) error
-	DeleteGroup(operatorID, groupID uint) error
-	GetGroups(userID uint) ([]*model.ChatGroupDetail, error)
-	GetMembers(userID, groupID uint) ([]*model.ChatGroupMemberDetail, error)
+	CreateGroup(ctx context.Context, ownerID uint, name, avatar string, memberIDs []uint) (*model.ChatGroupDetail, error)
+	AddMembers(ctx context.Context, operatorID, groupID uint, memberIDs []uint) ([]*model.ChatGroupMemberDetail, error)
+	RemoveMember(ctx context.Context, operatorID, groupID, memberID uint) error
+	LeaveGroup(ctx context.Context, userID, groupID uint) error
+	DeleteGroup(ctx context.Context, operatorID, groupID uint) error
+	GetGroups(ctx context.Context, userID uint) ([]*model.ChatGroupDetail, error)
+	GetMembers(ctx context.Context, userID, groupID uint) ([]*model.ChatGroupMemberDetail, error)
 }
 
 type groupService struct {
@@ -47,7 +47,8 @@ func NewGroupService(groupRepo repo.GroupRepository, friendRepo repo.FriendRepos
 	}
 }
 
-// ----------群组 service 私有方法----------
+// ----------私有方法----------
+// 去除无效成员ID、操作用户ID和重复ID
 func normalizeMemberIDs(excludeID uint, memberIDs []uint) []uint {
 	seen := make(map[uint]struct{}, len(memberIDs))
 	result := make([]uint, 0, len(memberIDs))
@@ -64,21 +65,23 @@ func normalizeMemberIDs(excludeID uint, memberIDs []uint) []uint {
 	return result
 }
 
-func (s *groupService) validateInvitees(operatorID uint, memberIDs []uint) error {
+// 验证关系
+func (s *groupService) validateInvitees(ctx context.Context, operatorID uint, memberIDs []uint) error {
 	for _, memberID := range memberIDs {
-		user, err := s.userRepo.GetByID(context.Background(), memberID)
+		user, err := s.userRepo.GetByID(ctx, memberID)
 		if err != nil || user == nil {
 			return ErrGroupMemberNotFound
 		}
-		if operatorID != 0 && !s.friendRepo.CheckFriendship(operatorID, memberID) {
+		if operatorID != 0 && !s.friendRepo.CheckFriendship(ctx, operatorID, memberID) {
 			return ErrGroupFriendOnly
 		}
 	}
 	return nil
 }
 
-func (s *groupService) buildGroupDetail(group *model.ChatGroup) (*model.ChatGroupDetail, error) {
-	count, err := s.groupRepo.CountMembers(group.ID)
+// 构建群详情
+func (s *groupService) buildGroupDetail(ctx context.Context, group *model.ChatGroup) (*model.ChatGroupDetail, error) {
+	count, err := s.groupRepo.CountMembers(ctx, group.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,29 +97,26 @@ func (s *groupService) buildGroupDetail(group *model.ChatGroup) (*model.ChatGrou
 }
 
 // ----------群组 service 方法----------
-
-func (s *groupService) CreateGroup(ownerID uint, name, avatar string, memberIDs []uint) (*model.ChatGroupDetail, error) {
+// 创建群聊
+func (s *groupService) CreateGroup(ctx context.Context, ownerID uint, name, avatar string, memberIDs []uint) (*model.ChatGroupDetail, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, ErrGroupNameEmpty
 	}
-
 	memberIDs = normalizeMemberIDs(ownerID, memberIDs)
 	if len(memberIDs) == 0 {
 		return nil, ErrGroupMembersEmpty
 	}
 
-	err := s.validateInvitees(ownerID, memberIDs)
+	err := s.validateInvitees(ctx, ownerID, memberIDs)
 	if err != nil {
 		return nil, err
 	}
-
 	group := &model.ChatGroup{
 		Name:    name,
 		Avatar:  strings.TrimSpace(avatar),
 		OwnerID: ownerID,
 	}
-
 	members := make([]*model.ChatGroupMember, 0, len(memberIDs)+1)
 	members = append(members, &model.ChatGroupMember{
 		UserID: ownerID,
@@ -129,38 +129,34 @@ func (s *groupService) CreateGroup(ownerID uint, name, avatar string, memberIDs 
 			Role:      "member",
 		})
 	}
-
-	err = s.groupRepo.Create(group, members)
+	err = s.groupRepo.Create(ctx, group, members)
 	if err != nil {
 		return nil, err
 	}
 	if s.e2ee != nil {
-		if err := s.e2ee.RotateGroupKey(context.Background(), group.ID, ownerID); err != nil {
+		if err := s.e2ee.RotateGroupKey(ctx, group.ID, ownerID); err != nil {
 			return nil, err
 		}
 	}
-
-	return s.buildGroupDetail(group)
+	return s.buildGroupDetail(ctx, group)
 }
 
-func (s *groupService) AddMembers(operatorID, groupID uint, memberIDs []uint) ([]*model.ChatGroupMemberDetail, error) {
-	if _, err := s.groupRepo.GetByID(groupID); err != nil {
+// 添加群成员
+func (s *groupService) AddMembers(ctx context.Context, operatorID, groupID uint, memberIDs []uint) ([]*model.ChatGroupMemberDetail, error) {
+	if _, err := s.groupRepo.GetByID(ctx, groupID); err != nil {
 		return nil, ErrGroupNotFound
 	}
-	if !s.groupRepo.IsMember(groupID, operatorID) {
+	if !s.groupRepo.IsMember(ctx, groupID, operatorID) {
 		return nil, ErrGroupPermission
 	}
-
 	memberIDs = normalizeMemberIDs(operatorID, memberIDs)
 	if len(memberIDs) == 0 {
 		return nil, ErrGroupMembersEmpty
 	}
-
-	err := s.validateInvitees(operatorID, memberIDs)
+	err := s.validateInvitees(ctx, operatorID, memberIDs)
 	if err != nil {
 		return nil, err
 	}
-
 	members := make([]*model.ChatGroupMember, 0, len(memberIDs))
 	for _, memberID := range memberIDs {
 		members = append(members, &model.ChatGroupMember{
@@ -170,20 +166,21 @@ func (s *groupService) AddMembers(operatorID, groupID uint, memberIDs []uint) ([
 			Role:      "member",
 		})
 	}
-	err = s.groupRepo.AddMembers(groupID, members)
+	err = s.groupRepo.AddMembers(ctx, groupID, members)
 	if err != nil {
 		return nil, err
 	}
 	if s.e2ee != nil {
-		if err := s.e2ee.RotateGroupKey(context.Background(), groupID, operatorID); err != nil {
+		if err := s.e2ee.RotateGroupKey(ctx, groupID, operatorID); err != nil {
 			return nil, err
 		}
 	}
-	return s.GetMembers(operatorID, groupID)
+	return s.GetMembers(ctx, operatorID, groupID)
 }
 
-func (s *groupService) RemoveMember(operatorID, groupID, memberID uint) error {
-	group, err := s.groupRepo.GetByID(groupID)
+// 移除群成员
+func (s *groupService) RemoveMember(ctx context.Context, operatorID, groupID, memberID uint) error {
+	group, err := s.groupRepo.GetByID(ctx, groupID)
 	if err != nil {
 		return ErrGroupNotFound
 	}
@@ -193,58 +190,60 @@ func (s *groupService) RemoveMember(operatorID, groupID, memberID uint) error {
 	if memberID == group.OwnerID {
 		return ErrGroupOwnerProtected
 	}
-	if !s.groupRepo.IsMember(groupID, memberID) {
+	if !s.groupRepo.IsMember(ctx, groupID, memberID) {
 		return ErrGroupMemberNotFound
 	}
-	if err := s.groupRepo.RemoveMember(groupID, memberID); err != nil {
+	if err := s.groupRepo.RemoveMember(ctx, groupID, memberID); err != nil {
 		return err
 	}
 	if s.e2ee != nil {
-		return s.e2ee.RotateGroupKey(context.Background(), groupID, operatorID)
+		return s.e2ee.RotateGroupKey(ctx, groupID, operatorID)
 	}
 	return nil
 }
 
-func (s *groupService) LeaveGroup(userID, groupID uint) error {
-	group, err := s.groupRepo.GetByID(groupID)
+// 退出群聊
+func (s *groupService) LeaveGroup(ctx context.Context, userID, groupID uint) error {
+	group, err := s.groupRepo.GetByID(ctx, groupID)
 	if err != nil {
 		return ErrGroupNotFound
 	}
-	if !s.groupRepo.IsMember(groupID, userID) {
+	if !s.groupRepo.IsMember(ctx, groupID, userID) {
 		return ErrGroupPermission
 	}
 	if group.OwnerID == userID {
 		return ErrGroupLeaveDenied
 	}
-	if err := s.groupRepo.RemoveMember(groupID, userID); err != nil {
+	if err := s.groupRepo.RemoveMember(ctx, groupID, userID); err != nil {
 		return err
 	}
 	if s.e2ee != nil {
-		return s.e2ee.RotateGroupKey(context.Background(), groupID, userID)
+		return s.e2ee.RotateGroupKey(ctx, groupID, userID)
 	}
 	return nil
 }
 
-func (s *groupService) DeleteGroup(operatorID, groupID uint) error {
-	group, err := s.groupRepo.GetByID(groupID)
+// 删除群聊
+func (s *groupService) DeleteGroup(ctx context.Context, operatorID, groupID uint) error {
+	group, err := s.groupRepo.GetByID(ctx, groupID)
 	if err != nil {
 		return ErrGroupNotFound
 	}
 	if group.OwnerID != operatorID {
 		return ErrGroupDeleteDenied
 	}
-	return s.groupRepo.DeleteGroup(groupID)
+	return s.groupRepo.DeleteGroup(ctx, groupID)
 }
 
-func (s *groupService) GetGroups(userID uint) ([]*model.ChatGroupDetail, error) {
-	groups, err := s.groupRepo.GetGroupsByUserID(userID)
+// 获取用户的群聊列表
+func (s *groupService) GetGroups(ctx context.Context, userID uint) ([]*model.ChatGroupDetail, error) {
+	groups, err := s.groupRepo.GetGroupsByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-
 	result := make([]*model.ChatGroupDetail, 0, len(groups))
 	for _, group := range groups {
-		detail, err := s.buildGroupDetail(group)
+		detail, err := s.buildGroupDetail(ctx, group)
 		if err != nil {
 			return nil, err
 		}
@@ -253,19 +252,18 @@ func (s *groupService) GetGroups(userID uint) ([]*model.ChatGroupDetail, error) 
 	return result, nil
 }
 
-func (s *groupService) GetMembers(userID, groupID uint) ([]*model.ChatGroupMemberDetail, error) {
-	if !s.groupRepo.IsMember(groupID, userID) {
+// 获取群成员列表
+func (s *groupService) GetMembers(ctx context.Context, userID, groupID uint) ([]*model.ChatGroupMemberDetail, error) {
+	if !s.groupRepo.IsMember(ctx, groupID, userID) {
 		return nil, ErrGroupPermission
 	}
-
-	members, err := s.groupRepo.GetMembersByGroupID(groupID)
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-
 	result := make([]*model.ChatGroupMemberDetail, 0, len(members))
 	for _, member := range members {
-		user, err := s.userRepo.GetByID(context.Background(), member.UserID)
+		user, err := s.userRepo.GetByID(ctx, member.UserID)
 		if err != nil || user == nil {
 			return nil, ErrGroupMemberNotFound
 		}

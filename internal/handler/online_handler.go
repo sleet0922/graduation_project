@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -17,8 +17,6 @@ import (
 
 const (
 	onlineHeartbeatInterval = 5 * time.Second
-	onlinePingTimeout       = 3 * time.Second
-	onlineWriteTimeout      = 5 * time.Second
 )
 
 type OnlineHandler struct {
@@ -44,32 +42,12 @@ type onlineOutgoingMessage struct {
 	Error    string         `json:"error,omitempty"`
 }
 
-type onlineSocketWriter struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
-}
-
 func NewOnlineHandler(chatService service.ChatService) *OnlineHandler {
 	return &OnlineHandler{chatService: chatService}
 }
 
-// ----------onlineSocketWriter 底层方法----------
-func (w *onlineSocketWriter) Write(ctx context.Context, payload onlineOutgoingMessage) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	writeCtx, cancel := context.WithTimeout(ctx, onlineWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.conn, payload)
-}
-
-func (w *onlineSocketWriter) Ping(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.conn.Ping(ctx)
-}
-
 // ----------OnlineHandler 私有方法----------
-func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *onlineSocketWriter, incoming onlineIncomingMessage) error {
+func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *SocketWriter, incoming onlineIncomingMessage) error {
 	userIDs := make([]uint, 0, len(incoming.UserIDs)+1)
 	if incoming.UserID > 0 {
 		userIDs = append(userIDs, incoming.UserID)
@@ -81,7 +59,7 @@ func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *onlineSoc
 		userIDs = append(userIDs, userID)
 	}
 	if len(userIDs) == 0 {
-		return writer.Write(ctx, onlineOutgoingMessage{
+		return writer.WriteJSON(ctx, onlineOutgoingMessage{
 			Type:  "error",
 			Error: "用户ID不能为空",
 		})
@@ -96,13 +74,13 @@ func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *onlineSoc
 	}
 
 	if len(statuses) == 1 {
-		return writer.Write(ctx, onlineOutgoingMessage{
+		return writer.WriteJSON(ctx, onlineOutgoingMessage{
 			Type:   "online_status",
 			UserID: statuses[0].UserID,
 			Online: statuses[0].Online,
 		})
 	}
-	return writer.Write(ctx, onlineOutgoingMessage{
+	return writer.WriteJSON(ctx, onlineOutgoingMessage{
 		Type:     "online_status",
 		Statuses: statuses,
 	})
@@ -110,12 +88,11 @@ func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *onlineSoc
 
 // ----------OnlineHandler 方法----------
 func (h *OnlineHandler) Connect(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+	currentUserID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-	currentUserID := userIDVal.(uint)
 
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -127,7 +104,7 @@ func (h *OnlineHandler) Connect(c *gin.Context) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := &onlineSocketWriter{conn: conn}
+	writer := &SocketWriter{Conn: conn}
 
 	go func() {
 		ticker := time.NewTicker(onlineHeartbeatInterval)
@@ -137,7 +114,7 @@ func (h *OnlineHandler) Connect(c *gin.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				pingCtx, pingCancel := context.WithTimeout(ctx, onlinePingTimeout)
+				pingCtx, pingCancel := context.WithTimeout(ctx, wsPingTimeout)
 				err := writer.Ping(pingCtx)
 				pingCancel()
 				if err != nil {
@@ -149,7 +126,7 @@ func (h *OnlineHandler) Connect(c *gin.Context) {
 		}
 	}()
 
-	if err := writer.Write(ctx, onlineOutgoingMessage{
+	if err := writer.WriteJSON(ctx, onlineOutgoingMessage{
 		Type:   "connected",
 		UserID: currentUserID,
 	}); err != nil {
@@ -167,7 +144,7 @@ func (h *OnlineHandler) Connect(c *gin.Context) {
 
 		switch incoming.Type {
 		case "ping":
-			if err := writer.Write(ctx, onlineOutgoingMessage{Type: "pong"}); err != nil {
+			if err := writer.WriteJSON(ctx, onlineOutgoingMessage{Type: "pong"}); err != nil {
 				return
 			}
 		case "check_online":
@@ -175,7 +152,8 @@ func (h *OnlineHandler) Connect(c *gin.Context) {
 				return
 			}
 		default:
-			if err := writer.Write(ctx, onlineOutgoingMessage{
+			logger.Warn("unsupported online message type", slog.Any("user_id", currentUserID), slog.String("type", incoming.Type))
+			if err := writer.WriteJSON(ctx, onlineOutgoingMessage{
 				Type:  "error",
 				Error: "不支持的消息类型",
 			}); err != nil {

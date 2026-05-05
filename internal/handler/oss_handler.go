@@ -2,8 +2,11 @@ package handler
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sleet0922/graduation_project/internal/config"
+	"sleet0922/graduation_project/pkg/errcode"
+	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/oss"
 	"sleet0922/graduation_project/pkg/response"
 	"strings"
@@ -49,9 +52,7 @@ func (h *OssHandler) GetUploadURL(c *gin.Context) {
 	switch fileType {
 	case "avatar":
 		fullObjectKey = "avatar/" + objectKey
-	case "chat":
-		fullObjectKey = "chat/" + objectKey
-	case "video":
+	case "chat", "video":
 		fullObjectKey = "chat/" + objectKey
 	default:
 		fullObjectKey = objectKey
@@ -59,7 +60,7 @@ func (h *OssHandler) GetUploadURL(c *gin.Context) {
 	// 生成预签名上传URL（有效期1小时）
 	presignedURL, err := h.kodoClient.GetPresignedUploadURL(c.Request.Context(), fullObjectKey, time.Hour)
 	if err != nil {
-		fmt.Printf("生成上传URL失败: %v\n", err)
+		logger.Error("生成上传URL失败", slog.Any("error", err), slog.String("key", fullObjectKey))
 		response.Error(c, http.StatusInternalServerError, "生成上传URL失败")
 		return
 	}
@@ -103,7 +104,7 @@ func (h *OssHandler) GetDownloadURL(c *gin.Context) {
 	// 生成预签名下载URL（有效期1小时）
 	url, err := h.kodoClient.GetPresignedDownloadURL(c.Request.Context(), fullObjectKey, time.Hour)
 	if err != nil {
-		fmt.Printf("生成下载URL失败: %v\n", err)
+		logger.Error("生成下载URL失败", slog.Any("error", err), slog.String("key", fullObjectKey))
 		response.Error(c, http.StatusInternalServerError, "生成下载URL失败")
 		return
 	}
@@ -114,36 +115,35 @@ func (h *OssHandler) GetDownloadURL(c *gin.Context) {
 	}, "获取下载URL成功")
 }
 
-func (h *OssHandler) UploadChatImage(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
+func (h *OssHandler) uploadChatFile(c *gin.Context, maxSize int64, mimePrefix, fileLabel, successLabel string) {
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "请选择图片文件")
+		response.Error(c, http.StatusBadRequest, "请选择"+fileLabel+"文件")
 		return
 	}
 	if file.Size == 0 {
-		response.Error(c, http.StatusBadRequest, "图片不能为空")
+		response.Error(c, http.StatusBadRequest, fileLabel+"不能为空")
 		return
 	}
-	if file.Size > 10*1024*1024 {
-		response.Error(c, http.StatusBadRequest, "图片大小不能超过10MB")
+	if file.Size > maxSize {
+		response.Error(c, http.StatusBadRequest, fileLabel+"大小不能超过"+formatSize(maxSize))
 		return
 	}
 	contentType := file.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "image/") && contentType != "application/octet-stream" {
-		response.Error(c, http.StatusBadRequest, "仅支持图片或二进制流上传")
+	if !strings.HasPrefix(contentType, mimePrefix) && contentType != "application/octet-stream" {
+		response.Error(c, http.StatusBadRequest, "仅支持"+fileLabel+"或二进制流上传")
 		return
 	}
 
-	userID := userIDVal.(uint)
 	fileURL, err := h.kodoClient.UploadFile(c.Request.Context(), file, fmt.Sprintf("chat/%d", userID))
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "上传聊天图片失败")
+		response.Error(c, http.StatusInternalServerError, "上传聊天"+fileLabel+"失败")
 		return
 	}
 
@@ -152,46 +152,20 @@ func (h *OssHandler) UploadChatImage(c *gin.Context) {
 		"content":     fileURL,
 		"filename":    file.Filename,
 		"contentType": contentType,
-	}, "上传聊天图片成功")
+	}, successLabel)
+}
+
+func formatSize(bytes int64) string {
+	if bytes >= 1024*1024*1024 {
+		return fmt.Sprintf("%dGB", bytes/(1024*1024*1024))
+	}
+	return fmt.Sprintf("%dMB", bytes/(1024*1024))
+}
+
+func (h *OssHandler) UploadChatImage(c *gin.Context) {
+	h.uploadChatFile(c, 10*1024*1024, "image/", "图片", "上传聊天图片成功")
 }
 
 func (h *OssHandler) UploadChatVideo(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		response.Error(c, http.StatusUnauthorized, "未找到用户信息")
-		return
-	}
-
-	file, err := c.FormFile("file")
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "请选择视频文件")
-		return
-	}
-	if file.Size == 0 {
-		response.Error(c, http.StatusBadRequest, "视频不能为空")
-		return
-	}
-	if file.Size > 100*1024*1024 {
-		response.Error(c, http.StatusBadRequest, "视频大小不能超过100MB")
-		return
-	}
-	contentType := file.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "video/") && contentType != "application/octet-stream" {
-		response.Error(c, http.StatusBadRequest, "仅支持视频或二进制流上传")
-		return
-	}
-
-	userID := userIDVal.(uint)
-	fileURL, err := h.kodoClient.UploadFile(c.Request.Context(), file, fmt.Sprintf("chat/%d", userID))
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "上传聊天视频失败")
-		return
-	}
-
-	response.Success(c, gin.H{
-		"url":         fileURL,
-		"content":     fileURL,
-		"filename":    file.Filename,
-		"contentType": contentType,
-	}, "上传聊天视频成功")
+	h.uploadChatFile(c, 100*1024*1024, "video/", "视频", "上传聊天视频成功")
 }

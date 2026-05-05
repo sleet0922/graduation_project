@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
 	"strconv"
@@ -50,14 +51,6 @@ func parseIntQuery(raw string) (int, error) {
 		return 0, err
 	}
 	return v, nil
-}
-
-func (h *E2EEHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
 }
 
 func (h *E2EEHandler) handleGroupKeyError(c *gin.Context, err error) {
@@ -116,9 +109,9 @@ func (h *E2EEHandler) PublishPublicKey(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "token 无效")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -166,9 +159,9 @@ func (h *E2EEHandler) GetPublicKey(c *gin.Context) {
 }
 
 func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
-	currentUserID, err := h.getUserID(c)
+	currentUserID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "token 无效")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 	groupID, err := parseUintQuery(c.Query("group_id"))
@@ -235,9 +228,9 @@ func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
 }
 
 func (h *E2EEHandler) PublishGroupKeyBoxes(c *gin.Context) {
-	currentUserID, err := h.getUserID(c)
+	currentUserID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "token 无效")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 	var req publishGroupKeyBoxesRequest
@@ -276,9 +269,9 @@ func (h *E2EEHandler) PublishGroupKeyBoxes(c *gin.Context) {
 }
 
 func (h *E2EEHandler) GetGroupKeyByVersion(c *gin.Context) {
-	currentUserID, err := h.getUserID(c)
+	currentUserID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "token 无效")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 	groupID, err := parseUintQuery(c.Query("group_id"))

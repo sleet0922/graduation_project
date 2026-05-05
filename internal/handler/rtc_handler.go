@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 
 	"sleet0922/graduation_project/internal/service"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -27,14 +27,6 @@ func (h *RTCHandler) handleServiceError(c *gin.Context, err error, fallback stri
 	response.Error(c, http.StatusInternalServerError, fallback)
 }
 
-func (h *RTCHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
-}
-
 // ----------RTC handler 方法----------
 
 func (h *RTCHandler) Invite(c *gin.Context) {
@@ -50,9 +42,9 @@ func (h *RTCHandler) Invite(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未登录")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -81,9 +73,9 @@ func (h *RTCHandler) Accept(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未登录")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -109,9 +101,9 @@ func (h *RTCHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未登录")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -136,9 +128,9 @@ func (h *RTCHandler) Cancel(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未登录")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -163,9 +155,9 @@ func (h *RTCHandler) Hangup(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未登录")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -194,9 +186,9 @@ func (h *RTCHandler) GetToken(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
+	userID, err := GetUserID(c)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, "未登录")
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 

@@ -2,10 +2,9 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
-	"sleet0922/graduation_project/pkg/jwt"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -15,24 +14,13 @@ import (
 type FriendHandler struct {
 	friendService service.FriendService
 	userService   service.UserService
-	jwtManager    *jwt.JWTManager
-}
-
-// ----------好友 handler 私有方法----------
-func (h *FriendHandler) getUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
-		return 0, fmt.Errorf("user_id not found in context")
-	}
-	return userID.(uint), nil
 }
 
 // ----------好友 handler 构造函数----------
-func NewFriendHandler(friendService service.FriendService, userService service.UserService, jwtManager *jwt.JWTManager) *FriendHandler {
+func NewFriendHandler(friendService service.FriendService, userService service.UserService) *FriendHandler {
 	return &FriendHandler{
 		friendService: friendService,
 		userService:   userService,
-		jwtManager:    jwtManager,
 	}
 }
 
@@ -50,9 +38,9 @@ func (h *FriendHandler) Create(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
@@ -73,7 +61,7 @@ func (h *FriendHandler) Create(c *gin.Context) {
 		return
 	}
 
-	err = h.friendService.SendFriendRequest(userID, friendID)
+	err = h.friendService.SendFriendRequest(c.Request.Context(), userID, friendID)
 	if err != nil {
 		if errors.Is(err, service.ErrCannotAddSelf) || errors.Is(err, service.ErrAlreadyFriend) || errors.Is(err, service.ErrRequestExists) {
 			response.Error(c, http.StatusBadRequest, err.Error())
@@ -98,13 +86,13 @@ func (h *FriendHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	err = h.friendService.RemoveFriend(userID, req.FriendID)
+	err = h.friendService.RemoveFriend(c.Request.Context(), userID, req.FriendID)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "删除好友失败")
 		return
@@ -114,13 +102,13 @@ func (h *FriendHandler) Delete(c *gin.Context) {
 }
 
 func (h *FriendHandler) GetByUserID(c *gin.Context) {
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	friendDetails, err := h.friendService.GetFriendDetailsByUserID(userID)
+	friendDetails, err := h.friendService.GetFriendDetailsByUserID(c.Request.Context(), userID)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "获取好友列表失败")
 		return
@@ -130,13 +118,13 @@ func (h *FriendHandler) GetByUserID(c *gin.Context) {
 }
 
 func (h *FriendHandler) GetFriendRequests(c *gin.Context) {
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	requests, err := h.friendService.GetFriendRequestsByUserID(userID)
+	requests, err := h.friendService.GetFriendRequestsByUserID(c.Request.Context(), userID)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "获取好友申请列表失败")
 		return
@@ -158,13 +146,13 @@ func (h *FriendHandler) HandleFriendRequest(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	err = h.friendService.HandleFriendRequest(userID, req.RequestID, req.Status)
+	err = h.friendService.HandleFriendRequest(c.Request.Context(), userID, req.RequestID, req.Status)
 	if err != nil {
 		if errors.Is(err, service.ErrFriendRequestPermission) {
 			response.Error(c, http.StatusForbidden, err.Error())
@@ -197,13 +185,13 @@ func (h *FriendHandler) CheckFriendship(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	isFriend := h.friendService.CheckFriendship(userID, req.FriendID)
+	isFriend := h.friendService.CheckFriendship(c.Request.Context(), userID, req.FriendID)
 
 	response.Success(c, gin.H{"is_friend": isFriend}, "检查好友关系成功")
 }
@@ -221,13 +209,13 @@ func (h *FriendHandler) UpdateRemark(c *gin.Context) {
 		return
 	}
 
-	userID, err := h.getUserID(c)
-	if err != nil || userID == 0 {
-		response.Error(c, http.StatusUnauthorized, "未获取到用户信息")
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
 
-	err = h.friendService.UpdateRemark(userID, req.FriendID, req.Remark)
+	err = h.friendService.UpdateRemark(c.Request.Context(), userID, req.FriendID, req.Remark)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "修改好友备注失败")
 		return
