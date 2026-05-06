@@ -13,22 +13,20 @@ import (
 
 type FriendHandler struct {
 	friendService service.FriendService
-	userService   service.UserService
 }
 
-// ----------好友 handler 构造函数----------
-func NewFriendHandler(friendService service.FriendService, userService service.UserService) *FriendHandler {
+func NewFriendHandler(friendService service.FriendService) *FriendHandler {
 	return &FriendHandler{
 		friendService: friendService,
-		userService:   userService,
 	}
 }
 
 // ----------好友 handler 方法----------
+// 发送好友申请
 func (h *FriendHandler) Create(c *gin.Context) {
 	type CreateFriendRequest struct {
 		FriendID uint   `json:"friend_id"`
-		Account  string `json:"account"` // 可选：通过账号或邮箱添加
+		Account  string `json:"account"`
 	}
 
 	var req CreateFriendRequest
@@ -44,27 +42,22 @@ func (h *FriendHandler) Create(c *gin.Context) {
 		return
 	}
 
-	friendID := req.FriendID
-
-	// 如果提供了 account，则去查找对应的 friend_id
-	if req.Account != "" {
-		user, err := h.userService.SearchUser(c.Request.Context(), req.Account)
-		if err != nil {
-			response.Error(c, http.StatusNotFound, "未找到该用户")
-			return
-		}
-		friendID = user.ID
-	}
-
-	if friendID == 0 {
+	if req.FriendID != 0 {
+		err = h.friendService.SendFriendRequest(c.Request.Context(), userID, req.FriendID)
+	} else if req.Account != "" {
+		req.FriendID, err = h.friendService.SendFriendRequestByAccount(c.Request.Context(), userID, req.Account)
+	} else {
 		response.Error(c, http.StatusBadRequest, "缺少有效的好友信息")
 		return
 	}
 
-	err = h.friendService.SendFriendRequest(c.Request.Context(), userID, friendID)
 	if err != nil {
 		if errors.Is(err, service.ErrCannotAddSelf) || errors.Is(err, service.ErrAlreadyFriend) || errors.Is(err, service.ErrRequestExists) {
 			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrUserNotFound) {
+			response.Error(c, http.StatusNotFound, "未找到该用户")
 			return
 		}
 		response.Error(c, http.StatusInternalServerError, "发送好友申请失败")
@@ -101,6 +94,7 @@ func (h *FriendHandler) Delete(c *gin.Context) {
 	response.Success(c, nil, "删除好友成功")
 }
 
+// 获取好友列表
 func (h *FriendHandler) GetByUserID(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {
@@ -117,6 +111,7 @@ func (h *FriendHandler) GetByUserID(c *gin.Context) {
 	response.Success(c, friendDetails, "获取好友列表成功")
 }
 
+// 获取好友申请列表
 func (h *FriendHandler) GetFriendRequests(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {
@@ -173,6 +168,7 @@ func (h *FriendHandler) HandleFriendRequest(c *gin.Context) {
 	response.Success(c, nil, "处理好友申请成功")
 }
 
+// 检查好友关系
 func (h *FriendHandler) CheckFriendship(c *gin.Context) {
 	type CheckFriendshipRequest struct {
 		FriendID uint `json:"friend_id" binding:"required"`
@@ -196,6 +192,7 @@ func (h *FriendHandler) CheckFriendship(c *gin.Context) {
 	response.Success(c, gin.H{"is_friend": isFriend}, "检查好友关系成功")
 }
 
+// 更新好友备注
 func (h *FriendHandler) UpdateRemark(c *gin.Context) {
 	type UpdateRemarkRequest struct {
 		FriendID uint   `json:"friend_id" binding:"required"`

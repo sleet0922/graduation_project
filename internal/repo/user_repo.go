@@ -5,6 +5,7 @@ import (
 	"sleet0922/graduation_project/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type UserRepository interface {
@@ -19,6 +20,7 @@ type UserRepository interface {
 	UpdatePassword(ctx context.Context, userID uint, password string) (*model.User, error)
 	UpdateProfile(ctx context.Context, userID uint, gender int, birthday string, location string) (*model.User, error)
 	GetSelf(ctx context.Context, userID uint) (*model.User, error)
+	UpsertLocation(ctx context.Context, location *model.UserLocation) error
 }
 
 type userRepository struct {
@@ -122,4 +124,12 @@ func (r *userRepository) GetSelf(ctx context.Context, userID uint) (*model.User,
 		return nil, err
 	}
 	return &user, nil
+}
+
+// 数据库 更新或插入用户位置
+func (r *userRepository) UpsertLocation(ctx context.Context, location *model.UserLocation) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"latitude", "longitude", "province", "city", "district", "address", "timestamp"}),
+	}).Create(location).Error
 }

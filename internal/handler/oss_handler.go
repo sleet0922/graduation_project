@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/oss"
@@ -19,9 +18,9 @@ type OssHandler struct {
 	kodoClient *oss.QiniuKodo
 }
 
-func NewOssHandler(cfg *config.ViperConfig) *OssHandler {
+func NewOssHandler(kodoClient *oss.QiniuKodo) *OssHandler {
 	return &OssHandler{
-		kodoClient: oss.NewQiniuKodo(cfg),
+		kodoClient: kodoClient,
 	}
 }
 

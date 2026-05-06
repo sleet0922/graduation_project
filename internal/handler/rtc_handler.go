@@ -14,11 +14,13 @@ type RTCHandler struct {
 	rtcService service.RTCService
 }
 
+// ----------RTC handler 构造函数----------
 func NewRTCHandler(rtcService service.RTCService) *RTCHandler {
 	return &RTCHandler{rtcService: rtcService}
 }
 
 // ----------RTC handler 私有方法----------
+// 处理RTC服务错误
 func (h *RTCHandler) handleServiceError(c *gin.Context, err error, fallback string) {
 	if serviceErr, ok := err.(*service.RTCServiceError); ok {
 		response.Error(c, serviceErr.HTTPCode, serviceErr.Message)
@@ -28,7 +30,7 @@ func (h *RTCHandler) handleServiceError(c *gin.Context, err error, fallback stri
 }
 
 // ----------RTC handler 方法----------
-
+// 发起呼叫
 func (h *RTCHandler) Invite(c *gin.Context) {
 	type inviteRequest struct {
 		PeerID   uint   `json:"peer_id"`
@@ -41,13 +43,11 @@ func (h *RTCHandler) Invite(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-
 	userID, err := GetUserID(c)
 	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-
 	data, err := h.rtcService.Invite(c.Request.Context(), userID, service.RTCInviteRequest{
 		PeerID:   req.PeerID,
 		GroupID:  req.GroupID,
@@ -61,6 +61,7 @@ func (h *RTCHandler) Invite(c *gin.Context) {
 	response.Success(c, data, "发起呼叫成功")
 }
 
+// 接听呼叫
 func (h *RTCHandler) Accept(c *gin.Context) {
 	type acceptRequest struct {
 		CallID string `json:"call_id" binding:"required"`
@@ -88,6 +89,7 @@ func (h *RTCHandler) Accept(c *gin.Context) {
 	response.Success(c, data, "接听成功")
 }
 
+// 拒绝呼叫
 func (h *RTCHandler) Reject(c *gin.Context) {
 	type rejectRequest struct {
 		CallID string `json:"call_id" binding:"required"`
@@ -116,6 +118,7 @@ func (h *RTCHandler) Reject(c *gin.Context) {
 	response.Success(c, nil, "拒绝成功")
 }
 
+// 取消呼叫
 func (h *RTCHandler) Cancel(c *gin.Context) {
 	type cancelRequest struct {
 		CallID string `json:"call_id" binding:"required"`
@@ -143,6 +146,7 @@ func (h *RTCHandler) Cancel(c *gin.Context) {
 	response.Success(c, nil, "取消成功")
 }
 
+// 挂断呼叫
 func (h *RTCHandler) Hangup(c *gin.Context) {
 	type hangupRequest struct {
 		CallID string `json:"call_id" binding:"required"`
@@ -170,6 +174,7 @@ func (h *RTCHandler) Hangup(c *gin.Context) {
 	response.Success(c, nil, "挂断成功")
 }
 
+// 获取RTC Token
 func (h *RTCHandler) GetToken(c *gin.Context) {
 	type rtcTokenRequest struct {
 		CallID   string `json:"call_id" binding:"required"`

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"sleet0922/graduation_project/internal/config"
+	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/jwt"
@@ -34,12 +34,10 @@ func generateSessionID() string {
 }
 
 // ----------用户 handler 构造函数----------
-func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, cfg *config.ViperConfig, chatService service.ChatService) *UserHandler {
-	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
+func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, accessTokenTTL, refreshTokenTTL time.Duration, chatService service.ChatService) *UserHandler {
 	if accessTokenTTL <= 0 {
 		accessTokenTTL = 24 * time.Hour
 	}
-	refreshTokenTTL := time.Duration(cfg.JWT.RefreshTokenExpireSeconds) * time.Second
 	if refreshTokenTTL <= 0 {
 		refreshTokenTTL = 30 * 24 * time.Hour
 	}
@@ -54,6 +52,7 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager,
 }
 
 // ----------用户 handler 方法----------
+// 获取当前用户信息
 func (h *UserHandler) GetSelf(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {
@@ -72,13 +71,13 @@ func (h *UserHandler) GetSelf(c *gin.Context) {
 	response.Success(c, user, "获取用户信息成功")
 }
 
+// 搜索用户
 func (h *UserHandler) SearchUser(c *gin.Context) {
 	keyword := c.Query("keyword")
 	if keyword == "" {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-
 	user, err := h.userService.SearchUser(c.Request.Context(), keyword)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
@@ -88,7 +87,6 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
-
 	response.Success(c, gin.H{
 		"id":       user.ID,
 		"account":  user.Account,
@@ -101,19 +99,18 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 	}, "搜索用户成功")
 }
 
+// 用户注册
 func (h *UserHandler) Register(c *gin.Context) {
 	type RegisterRequest struct {
 		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
-
 	var req RegisterRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-
 	user, err := h.userService.Register(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrUserAlreadyExists) {
@@ -131,19 +128,18 @@ func (h *UserHandler) Register(c *gin.Context) {
 	}, "注册成功")
 }
 
+// 用户登录
 func (h *UserHandler) Login(c *gin.Context) {
 	type LoginRequest struct {
 		Account  string `json:"account" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
-
 	var req LoginRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
 		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 		return
 	}
-
 	user, err := h.userService.Login(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
@@ -153,16 +149,11 @@ func (h *UserHandler) Login(c *gin.Context) {
 		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
-
-	// 生成新的 session_id，用于多设备踢下线
 	sessionID := generateSessionID()
-	// session_id 存入 Redis，TTL 对齐 refresh_token 有效期
 	_, err = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
 	if err != nil {
-		// Redis 故障不应阻断登录，但需记录以便排查
 		slog.Warn("SetUserSession failed", slog.Any("user_id", user.ID), slog.Any("error", err))
 	}
-	// 踢掉该用户在其他设备的旧连接
 	if h.chatService != nil {
 		h.chatService.KickUserConnections(user.ID, "账号在其他设备登录")
 	}
@@ -197,6 +188,62 @@ func (h *UserHandler) Login(c *gin.Context) {
 	}, "登录成功")
 }
 
+// 用户位置
+func (h *UserHandler) ReportLocation(c *gin.Context) {
+	type LocationRequest struct {
+		Latitude  float64 `json:"latitude" binding:"required"`
+		Longitude float64 `json:"longitude" binding:"required"`
+		Province  string  `json:"province"`
+		City      string  `json:"city"`
+		District  string  `json:"district"`
+		Address   string  `json:"address"`
+		Timestamp int64   `json:"timestamp"`
+	}
+
+	var req LocationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
+		return
+	}
+
+	userID, err := GetUserID(c)
+	if err != nil {
+		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
+		return
+	}
+
+	location := &model.UserLocation{
+		UserID:    userID,
+		Latitude:  req.Latitude,
+		Longitude: req.Longitude,
+		Province:  req.Province,
+		City:      req.City,
+		District:  req.District,
+		Address:   req.Address,
+		Timestamp: req.Timestamp,
+	}
+
+	if err := h.userService.UpsertLocation(c.Request.Context(), location); err != nil {
+		slog.Error("Failed to save user location", slog.Any("error", err), slog.Any("user_id", userID))
+		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
+		return
+	}
+
+	slog.Info("Received and saved user location report",
+		slog.Any("user_id", userID),
+		slog.Float64("latitude", req.Latitude),
+		slog.Float64("longitude", req.Longitude),
+		slog.String("province", req.Province),
+		slog.String("city", req.City),
+		slog.String("district", req.District),
+		slog.String("address", req.Address),
+		slog.Int64("timestamp", req.Timestamp),
+	)
+
+	response.Success(c, nil, "上报成功")
+}
+
+// 用户刷新token
 func (h *UserHandler) RefreshToken(c *gin.Context) {
 	type RefreshTokenRequest struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
@@ -229,6 +276,7 @@ func (h *UserHandler) RefreshToken(c *gin.Context) {
 	}, "刷新token成功")
 }
 
+// 用户更新头像
 func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 	type UpdateAvatarRequest struct {
 		Avatar string `json:"avatar" binding:"required"`
@@ -253,6 +301,7 @@ func (h *UserHandler) UpdateAvatar(c *gin.Context) {
 	response.Success(c, gin.H{"id": user.ID, "object_key": user.Avatar}, "更新头像成功")
 }
 
+// 用户更新用户名
 func (h *UserHandler) UpdateName(c *gin.Context) {
 	type UpdateNameRequest struct {
 		Name string `json:"name" binding:"required"`
@@ -277,6 +326,7 @@ func (h *UserHandler) UpdateName(c *gin.Context) {
 	response.Success(c, gin.H{"id": user.ID, "name": user.Name}, "更新用户名成功")
 }
 
+// 用户更新密码
 func (h *UserHandler) UpdatePassword(c *gin.Context) {
 	type UpdatePasswordRequest struct {
 		Password    string `json:"password" binding:"required"`
@@ -310,6 +360,7 @@ func (h *UserHandler) UpdatePassword(c *gin.Context) {
 	response.Success(c, nil, "更新密码成功")
 }
 
+// 用户更新资料
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	type UpdateProfileRequest struct {
 		Gender   int    `json:"gender"`
@@ -341,18 +392,17 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}, "更新资料成功")
 }
 
+// 用户删除
 func (h *UserHandler) Delete(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {
 		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 		return
 	}
-
 	err = h.userService.Delete(c.Request.Context(), userID)
 	if err != nil {
 		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 		return
 	}
-
 	response.Success(c, nil, "删除用户成功")
 }

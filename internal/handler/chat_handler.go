@@ -49,6 +49,7 @@ func NewChatHandler(chatService service.ChatService) *ChatHandler {
 }
 
 // ----------ChatHandler 方法----------
+// 建立聊天WebSocket连接
 func (h *ChatHandler) Connect(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {

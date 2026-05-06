@@ -87,6 +87,7 @@ func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, writer *SocketWri
 }
 
 // ----------OnlineHandler 方法----------
+// 建立在线状态WebSocket连接
 func (h *OnlineHandler) Connect(c *gin.Context) {
 	currentUserID, err := GetUserID(c)
 	if err != nil {

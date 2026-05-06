@@ -32,18 +32,20 @@ type GroupService interface {
 }
 
 type groupService struct {
-	groupRepo  repo.GroupRepository
-	friendRepo repo.FriendRepository
-	userRepo   repo.UserRepository
-	e2ee       E2EEService
+	groupRepo   repo.GroupRepository
+	friendRepo  repo.FriendRepository
+	userRepo    repo.UserRepository
+	e2ee        E2EEService
+	chatService ChatService
 }
 
-func NewGroupService(groupRepo repo.GroupRepository, friendRepo repo.FriendRepository, userRepo repo.UserRepository, e2ee E2EEService) GroupService {
+func NewGroupService(groupRepo repo.GroupRepository, friendRepo repo.FriendRepository, userRepo repo.UserRepository, e2ee E2EEService, chatService ChatService) GroupService {
 	return &groupService{
-		groupRepo:  groupRepo,
-		friendRepo: friendRepo,
-		userRepo:   userRepo,
-		e2ee:       e2ee,
+		groupRepo:   groupRepo,
+		friendRepo:  friendRepo,
+		userRepo:    userRepo,
+		e2ee:        e2ee,
+		chatService: chatService,
 	}
 }
 
@@ -232,7 +234,27 @@ func (s *groupService) DeleteGroup(ctx context.Context, operatorID, groupID uint
 	if group.OwnerID != operatorID {
 		return ErrGroupDeleteDenied
 	}
-	return s.groupRepo.DeleteGroup(ctx, groupID)
+
+	var memberIDs []uint
+	if s.chatService != nil {
+		members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+		if err == nil && len(members) > 0 {
+			memberIDs = make([]uint, 0, len(members))
+			for _, m := range members {
+				memberIDs = append(memberIDs, m.UserID)
+			}
+		}
+	}
+
+	err = s.groupRepo.DeleteGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+
+	if s.chatService != nil && len(memberIDs) > 0 {
+		s.chatService.BroadcastGroupDissolved(ctx, groupID, memberIDs)
+	}
+	return nil
 }
 
 // 获取用户的群聊列表

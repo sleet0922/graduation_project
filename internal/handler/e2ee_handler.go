@@ -97,6 +97,7 @@ func maskToken(raw string) string {
 
 // ----------E2EE handler 方法----------
 
+// 发布用户公钥
 func (h *E2EEHandler) PublishPublicKey(c *gin.Context) {
 	type publishKeyRequest struct {
 		KeyType   string `json:"key_type" binding:"required"`
@@ -132,6 +133,7 @@ func (h *E2EEHandler) PublishPublicKey(c *gin.Context) {
 	}, "ok")
 }
 
+// 获取用户公钥
 func (h *E2EEHandler) GetPublicKey(c *gin.Context) {
 	userIDText := c.Query("user_id")
 	parsedID, err := strconv.ParseUint(userIDText, 10, 64)
@@ -268,6 +270,7 @@ func (h *E2EEHandler) PublishGroupKeyBoxes(c *gin.Context) {
 	}, "ok")
 }
 
+// 获取指定版本的群聊密钥
 func (h *E2EEHandler) GetGroupKeyByVersion(c *gin.Context) {
 	currentUserID, err := GetUserID(c)
 	if err != nil {

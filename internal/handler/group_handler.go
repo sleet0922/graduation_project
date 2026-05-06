@@ -1,11 +1,9 @@
 package handler
 
 import (
-	"log/slog"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/errcode"
-	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
 	"strconv"
 
@@ -14,13 +12,14 @@ import (
 
 type GroupHandler struct {
 	groupService service.GroupService
-	chatService  service.ChatService
 }
 
-func NewGroupHandler(groupService service.GroupService, chatService service.ChatService) *GroupHandler {
-	return &GroupHandler{groupService: groupService, chatService: chatService}
+func NewGroupHandler(groupService service.GroupService) *GroupHandler {
+	return &GroupHandler{groupService: groupService}
 }
 
+// ----------GroupHandler 方法----------
+// 创建群聊
 func (h *GroupHandler) Create(c *gin.Context) {
 	type createGroupRequest struct {
 		Name      string `json:"name" binding:"required"`
@@ -49,6 +48,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	response.Success(c, group, "创建群聊成功")
 }
 
+// 邀请加入群聊
 func (h *GroupHandler) AddMembers(c *gin.Context) {
 	type addGroupMembersRequest struct {
 		GroupID   uint   `json:"group_id" binding:"required"`
@@ -76,6 +76,7 @@ func (h *GroupHandler) AddMembers(c *gin.Context) {
 	response.Success(c, members, "拉群成功")
 }
 
+// 移除群成员
 func (h *GroupHandler) RemoveMember(c *gin.Context) {
 	type removeGroupMemberRequest struct {
 		GroupID  uint `json:"group_id" binding:"required"`
@@ -103,6 +104,7 @@ func (h *GroupHandler) RemoveMember(c *gin.Context) {
 	response.Success(c, nil, "踢出群成员成功")
 }
 
+// 退出群聊
 func (h *GroupHandler) Leave(c *gin.Context) {
 	type leaveGroupRequest struct {
 		GroupID uint `json:"group_id" binding:"required"`
@@ -147,28 +149,16 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	members, err := h.groupService.GetMembers(c.Request.Context(), userID, req.GroupID)
-	if err != nil {
-		logger.Warn("获取群成员失败，跳过广播解散通知", slog.Any("group_id", req.GroupID), slog.Any("error", err))
-	}
-
 	err = h.groupService.DeleteGroup(c.Request.Context(), userID, req.GroupID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if h.chatService != nil && len(members) > 0 {
-		var memberIDs []uint
-		for _, m := range members {
-			memberIDs = append(memberIDs, m.UserID)
-		}
-		h.chatService.BroadcastGroupDissolved(c.Request.Context(), req.GroupID, memberIDs)
-	}
-
 	response.Success(c, nil, "删除群聊成功")
 }
 
+// 获取群聊列表
 func (h *GroupHandler) GetGroups(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {
@@ -184,6 +174,7 @@ func (h *GroupHandler) GetGroups(c *gin.Context) {
 	response.Success(c, groups, "获取群聊列表成功")
 }
 
+// 获取群成员列表
 func (h *GroupHandler) GetMembers(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {

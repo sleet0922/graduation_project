@@ -37,6 +37,7 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 
 	err = db.AutoMigrate(
 		&model.User{},
+		&model.UserLocation{},
 		&model.Friend{},
 		&model.FriendRequest{},
 		&model.ChatGroup{},

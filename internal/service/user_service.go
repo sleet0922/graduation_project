@@ -34,6 +34,7 @@ type UserService interface {
 	UpdatePassword(ctx context.Context, userID uint, oldPassword, newPassword string) error
 	UpdateProfile(ctx context.Context, userID uint, gender int, birthday string, location string) (*model.User, error)
 	GetSelf(ctx context.Context, userID uint) (*model.User, error)
+	UpsertLocation(ctx context.Context, location *model.UserLocation) error
 }
 
 // ----------用户service 实现----------
@@ -177,4 +178,9 @@ func (s *userService) GetSelf(ctx context.Context, userID uint) (*model.User, er
 // 用户删除
 func (s *userService) Delete(ctx context.Context, userID uint) error {
 	return s.userRepo.Delete(ctx, userID)
+}
+
+// 更新/插入用户位置
+func (s *userService) UpsertLocation(ctx context.Context, location *model.UserLocation) error {
+	return s.userRepo.UpsertLocation(ctx, location)
 }

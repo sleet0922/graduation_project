@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"sleet0922/graduation_project/internal/config"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/logger"
@@ -126,15 +125,15 @@ func (e *RTCServiceError) Error() string {
 	return e.Message
 }
 
-func NewRTCService(cfg *config.ViperConfig, userRepo repo.UserRepository, friendRepo repo.FriendRepository, groupRepo repo.GroupRepository, chatService ChatService) RTCService {
+func NewRTCService(appID, appKey string, tokenLifetime time.Duration, userRepo repo.UserRepository, friendRepo repo.FriendRepository, groupRepo repo.GroupRepository, chatService ChatService) RTCService {
 	return &rtcService{
 		userRepo:       userRepo,
 		friendRepo:     friendRepo,
 		groupRepo:      groupRepo,
 		chatService:    chatService,
-		appID:          strings.TrimSpace(cfg.RTC.AppID),
-		appKey:         strings.TrimSpace(cfg.RTC.AppKey),
-		tokenLifetime:  loadRTCTokenLifetime(cfg.RTC.TokenExpireSeconds),
+		appID:          strings.TrimSpace(appID),
+		appKey:         strings.TrimSpace(appKey),
+		tokenLifetime:  tokenLifetime,
 		inviteTTL:      defaultRTCInviteTTL,
 		calls:          make(map[string]*rtcCall),
 		activeCallByID: make(map[uint]string),
@@ -250,14 +249,6 @@ func isTerminalStatus(status string) bool {
 	default:
 		return false
 	}
-}
-
-// 规范化成员ID列表
-func loadRTCTokenLifetime(seconds int) time.Duration {
-	if seconds <= 0 {
-		return defaultRTCTokenExpire
-	}
-	return time.Duration(seconds) * time.Second
 }
 
 // 规范化成员ID列表

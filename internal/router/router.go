@@ -7,6 +7,8 @@ import (
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/jwt"
+	"sleet0922/graduation_project/pkg/oss"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -15,33 +17,40 @@ import (
 func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r := gin.New()
 
-	// 添加中间件
 	r.Use(middleware.GinLogger())
 	r.Use(middleware.GinRecovery())
 	r.Use(middleware.CorsMiddleware())
 
-	// 初始化JWT
 	jwtManager := jwt.NewJWTManager(cfg.JWT.SecretKey)
 	jwtMiddleware := middleware.NewJWTMiddleware(jwtManager)
 
-	// 依赖注入
 	userRepo := repo.NewUserRepository(db)
-	userService := service.NewUserService(userRepo)
 	friendRepo := repo.NewFriendRepository(db)
 	groupRepo := repo.NewGroupRepository(db)
 	e2eeKeyRepo := repo.NewE2EEKeyRepository(db)
 	e2eeGroupKeyRepo := repo.NewE2EEGroupKeyRepository(db)
+
+	userService := service.NewUserService(userRepo)
+	friendService := service.NewFriendService(friendRepo, userRepo)
 	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo)
-	friendService := service.NewFriendService(friendRepo)
-	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService)
 	chatService := service.NewChatService(friendRepo, groupRepo)
-	rtcService := service.NewRTCService(cfg, userRepo, friendRepo, groupRepo, chatService)
+	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)
 
-	userHandler := handler.NewUserHandler(userService, jwtManager, cfg, chatService)
-	ossHandler := handler.NewOssHandler(cfg)
+	rtcTokenTTL := time.Duration(cfg.RTC.TokenExpireSeconds) * time.Second
+	if rtcTokenTTL <= 0 {
+		rtcTokenTTL = 2 * time.Hour
+	}
+	rtcService := service.NewRTCService(cfg.RTC.AppID, cfg.RTC.AppKey, rtcTokenTTL, userRepo, friendRepo, groupRepo, chatService)
 
-	friendHandler := handler.NewFriendHandler(friendService, userService)
-	groupHandler := handler.NewGroupHandler(groupService, chatService)
+	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
+	refreshTokenTTL := time.Duration(cfg.JWT.RefreshTokenExpireSeconds) * time.Second
+	userHandler := handler.NewUserHandler(userService, jwtManager, accessTokenTTL, refreshTokenTTL, chatService)
+
+	kodoClient := oss.NewQiniuKodo(cfg)
+	ossHandler := handler.NewOssHandler(kodoClient)
+
+	friendHandler := handler.NewFriendHandler(friendService)
+	groupHandler := handler.NewGroupHandler(groupService)
 	chatHandler := handler.NewChatHandler(chatService)
 	onlineHandler := handler.NewOnlineHandler(chatService)
 	rtcHandler := handler.NewRTCHandler(rtcService)
@@ -61,6 +70,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
 	r.POST("/api/user/profile_update", jwtMiddleware.Auth(), userHandler.UpdateProfile)
 	r.POST("/api/user/self", jwtMiddleware.Auth(), userHandler.GetSelf)
+	r.POST("/api/user/location", jwtMiddleware.Auth(), userHandler.ReportLocation)
 	r.GET("/api/user/search", jwtMiddleware.Auth(), userHandler.SearchUser)
 	r.POST("/api/friend/request", jwtMiddleware.Auth(), friendHandler.Create)
 	r.GET("/api/friend/requests", jwtMiddleware.Auth(), friendHandler.GetFriendRequests)

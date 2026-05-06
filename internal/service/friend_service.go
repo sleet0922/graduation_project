@@ -15,9 +15,9 @@ var (
 	ErrInvalidFriendRequestStatus = errors.New("无效的好友申请处理状态")
 )
 
-// ----------好友 service 接口----------
 type FriendService interface {
 	SendFriendRequest(ctx context.Context, senderID, receiverID uint) error
+	SendFriendRequestByAccount(ctx context.Context, senderID uint, account string) (uint, error)
 	HandleFriendRequest(ctx context.Context, userID, requestID uint, status uint) error
 	GetFriendRequestsByUserID(ctx context.Context, userID uint) ([]*model.FriendRequest, error)
 	RemoveFriend(ctx context.Context, userID, friendID uint) error
@@ -27,14 +27,13 @@ type FriendService interface {
 	UpdateRemark(ctx context.Context, userID, friendID uint, remark string) error
 }
 
-// ----------好友 service 实现----------
 type friendService struct {
 	friendRepo repo.FriendRepository
+	userRepo   repo.UserRepository
 }
 
-// ----------好友 service 构造函数----------
-func NewFriendService(repo repo.FriendRepository) FriendService {
-	return &friendService{friendRepo: repo}
+func NewFriendService(friendRepo repo.FriendRepository, userRepo repo.UserRepository) FriendService {
+	return &friendService{friendRepo: friendRepo, userRepo: userRepo}
 }
 
 // 发送好友请求
@@ -58,6 +57,14 @@ func (s *friendService) SendFriendRequest(ctx context.Context, senderID, receive
 		Status:     0,
 	}
 	return s.friendRepo.SendFriendRequest(ctx, friendRequest)
+}
+
+func (s *friendService) SendFriendRequestByAccount(ctx context.Context, senderID uint, account string) (uint, error) {
+	user, err := s.userRepo.GetByAccount(ctx, account)
+	if err != nil {
+		return 0, ErrUserNotFound
+	}
+	return user.ID, s.SendFriendRequest(ctx, senderID, user.ID)
 }
 
 // 处理好友请求
