@@ -32,8 +32,8 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 
 	userService := service.NewUserService(userRepo)
 	friendService := service.NewFriendService(friendRepo, userRepo)
-	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo)
 	chatService := service.NewChatService(friendRepo, groupRepo)
+	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo, friendRepo, chatService)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)
 
 	rtcTokenTTL := time.Duration(cfg.RTC.TokenExpireSeconds) * time.Second

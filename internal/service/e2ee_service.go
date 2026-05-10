@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
+	"sleet0922/graduation_project/pkg/logger"
 	"strings"
 
 	"gorm.io/gorm"
@@ -48,13 +49,17 @@ type e2eeService struct {
 	keyRepo      repo.E2EEKeyRepository
 	groupRepo    repo.GroupRepository
 	groupKeyRepo repo.E2EEGroupKeyRepository
+	friendRepo   repo.FriendRepository
+	chatService  ChatService
 }
 
-func NewE2EEService(keyRepo repo.E2EEKeyRepository, groupRepo repo.GroupRepository, groupKeyRepo repo.E2EEGroupKeyRepository) E2EEService {
+func NewE2EEService(keyRepo repo.E2EEKeyRepository, groupRepo repo.GroupRepository, groupKeyRepo repo.E2EEGroupKeyRepository, friendRepo repo.FriendRepository, chatService ChatService) E2EEService {
 	return &e2eeService{
 		keyRepo:      keyRepo,
 		groupRepo:    groupRepo,
 		groupKeyRepo: groupKeyRepo,
+		friendRepo:   friendRepo,
+		chatService:  chatService,
 	}
 }
 
@@ -104,6 +109,13 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 	if err != nil || len(decoded) != 32 {
 		return nil, ErrInvalidE2EEPublicKey
 	}
+
+	var oldPublicKey string
+	oldKey, err := s.keyRepo.GetByUserID(ctx, userID)
+	if err == nil && oldKey != nil {
+		oldPublicKey = oldKey.PublicKey
+	}
+
 	record := &model.E2EEUserPublicKey{
 		UserID:    userID,
 		KeyType:   normalizedKeyType,
@@ -112,7 +124,32 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 	if err := s.keyRepo.Upsert(ctx, record); err != nil {
 		return nil, err
 	}
+
+	if oldPublicKey != "" && oldPublicKey != normalizedPublicKey {
+		go s.notifyFriendsKeyChanged(userID)
+	}
+
 	return s.keyRepo.GetByUserID(ctx, userID)
+}
+
+func (s *e2eeService) notifyFriendsKeyChanged(userID uint) {
+	ctx := context.Background()
+	friends, err := s.friendRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		logger.Error("failed to get friend list for e2ee key change notification", "user_id", userID, "error", err)
+		return
+	}
+	if len(friends) == 0 {
+		return
+	}
+	friendIDs := make([]uint, 0, len(friends))
+	for _, f := range friends {
+		friendIDs = append(friendIDs, f.FriendID)
+	}
+	s.chatService.PushSystemEvent(ctx, friendIDs, map[string]any{
+		"type":    "e2ee_key_changed",
+		"user_id": userID,
+	})
 }
 
 // 获取用户的公钥
