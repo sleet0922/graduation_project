@@ -9,19 +9,14 @@ import (
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
-	"time"
+	"sleet0922/graduation_project/pkg/snapws"
 
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 	"github.com/gin-gonic/gin"
-)
-
-const (
-	chatHeartbeatInterval = 5 * time.Second
 )
 
 type ChatHandler struct {
 	chatService service.ChatService
+	upgrader    *snapws.Upgrader
 }
 
 type chatIncomingMessage struct {
@@ -45,11 +40,12 @@ type chatOutgoingMessage struct {
 func NewChatHandler(chatService service.ChatService) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
+		upgrader:    GetSnapWSUpgrader(),
 	}
 }
 
 // ----------ChatHandler 方法----------
-// 建立聊天WebSocket连接
+// 建立聊天 WebSocket 连接
 func (h *ChatHandler) Connect(c *gin.Context) {
 	userID, err := GetUserID(c)
 	if err != nil {
@@ -57,40 +53,17 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		return
 	}
 
-	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request)
 	if err != nil {
 		return
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	writer := &SocketWriter{Conn: conn}
-	go func() {
-		ticker := time.NewTicker(chatHeartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				pingCtx, pingCancel := context.WithTimeout(ctx, wsPingTimeout)
-				err := writer.Ping(pingCtx)
-				pingCancel()
-				if err != nil {
-					logger.Warn("websocket ping failed", slog.Any("user_id", userID), slog.Any("error", err))
-					conn.Close(websocket.StatusGoingAway, "ping failed")
-					return
-				}
-			}
-		}
-	}()
 
-	if err := writer.WriteJSON(ctx, chatOutgoingMessage{
+	ctx := context.Background()
+	if err := conn.SendJSON(ctx, chatOutgoingMessage{
 		Type:   "connected",
 		UserID: userID,
 	}); err != nil {
+		conn.Close()
 		return
 	}
 
@@ -100,14 +73,11 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			Message: message,
 			Offline: offline,
 		}
-		if offline {
-			return writer.WriteJSON(ctx, payload)
-		}
-		return writer.WriteVerified(ctx, payload)
+		return conn.SendJSON(ctx, payload)
 	}, func(payload any) error {
-		return writer.WriteVerified(ctx, payload)
+		return conn.SendJSON(ctx, payload)
 	}, func() {
-		cancel()
+		conn.Close()
 	})
 	logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
 
@@ -118,21 +88,19 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 
 	for {
 		var incoming chatIncomingMessage
-		err := wsjson.Read(ctx, conn, &incoming)
-		if err != nil {
+		if err := conn.ReadJSON(&incoming); err != nil {
 			return
 		}
 
 		if incoming.Type != "chat" {
-			// ping/pong 心跳静默处理，不需打日志或报错
 			if incoming.Type == "ping" {
-				if err := writer.WriteJSON(ctx, chatOutgoingMessage{Type: "pong"}); err != nil {
+				if err := conn.SendJSON(ctx, chatOutgoingMessage{Type: "pong"}); err != nil {
 					return
 				}
 				continue
 			}
 			logger.Warn("unsupported message type", slog.Any("user_id", userID), slog.String("type", incoming.Type))
-			err = writer.WriteJSON(ctx, chatOutgoingMessage{
+			err = conn.SendJSON(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: "不支持的消息类型",
 			})
@@ -144,7 +112,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 
 		if incoming.ToUserID == 0 && incoming.GroupID == 0 {
 			logger.Warn("empty receiver", slog.Any("user_id", userID))
-			err = writer.WriteJSON(ctx, chatOutgoingMessage{
+			err = conn.SendJSON(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: "接收方或群聊不能为空",
 			})
@@ -157,7 +125,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 		message, err := h.chatService.SendMessage(ctx, userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
 		if err != nil {
 			logger.Warn("send message failed", slog.Any("user_id", userID), slog.Any("to_user_id", incoming.ToUserID), slog.Any("group_id", incoming.GroupID), slog.Any("error", err))
-			if writeErr := writer.WriteJSON(ctx, chatOutgoingMessage{
+			if writeErr := conn.SendJSON(ctx, chatOutgoingMessage{
 				Type:  "error",
 				Error: err.Error(),
 			}); writeErr != nil {
@@ -165,7 +133,7 @@ func (h *ChatHandler) Connect(c *gin.Context) {
 			}
 			continue
 		}
-		if err := writer.WriteJSON(ctx, chatOutgoingMessage{
+		if err := conn.SendJSON(ctx, chatOutgoingMessage{
 			Type:    "sent",
 			Message: message,
 		}); err != nil {

@@ -1,27 +1,23 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 	"github.com/gin-gonic/gin"
-
 	"sleet0922/graduation_project/pkg/logger"
+	"sleet0922/graduation_project/pkg/snapws"
 )
 
-// ErrUserIDNotFound 在gin.Context中未找到认证中间件注入的user_id时返回
-var ErrUserIDNotFound = errors.New("在context中未发现user_id")
+// ErrUserIDNotFound 在 gin.Context 中未找到认证中间件注入的 user_id 时返回
+var ErrUserIDNotFound = errors.New("在 context 中未发现 user_id")
 
-// GetUserID 从gin.Context中提取认证中间件注入的 user_id
+// GetUserID 从 gin.Context 中提取认证中间件注入的 user_id
 func GetUserID(c *gin.Context) (uint, error) {
 	userID, exists := c.Get("user_id")
 	if !exists {
-		logger.Warn("在context中未发现user_id",
+		logger.Warn("在 context 中未发现 user_id",
 			"path", c.Request.URL.Path,
 			"method", c.Request.Method,
 			"ip", c.ClientIP(),
@@ -31,46 +27,17 @@ func GetUserID(c *gin.Context) (uint, error) {
 	return userID.(uint), nil
 }
 
-// ---------- 公共 WebSocket Writer ----------
-
-const (
-	wsWriteTimeout = 5 * time.Second
-	wsPingTimeout  = 3 * time.Second
-)
-
-// SocketWriter WebSocket 安全写入器，内嵌互斥锁防止并发写入
-type SocketWriter struct {
-	Conn *websocket.Conn
-	mu   sync.Mutex
-}
-
-func (w *SocketWriter) WriteJSON(ctx context.Context, payload any) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.Conn, payload)
-}
-
-func (w *SocketWriter) Ping(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	pingCtx, cancel := context.WithTimeout(ctx, wsPingTimeout)
-	defer cancel()
-	return w.Conn.Ping(pingCtx)
-}
-
-// 先 ping 验证连接存活，再写入
-func (w *SocketWriter) WriteVerified(ctx context.Context, payload any) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	pingCtx, cancel := context.WithTimeout(ctx, wsPingTimeout)
-	err := w.Conn.Ping(pingCtx)
-	cancel()
-	if err != nil {
-		return err
-	}
-	writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
-	defer cancel()
-	return wsjson.Write(writeCtx, w.Conn, payload)
+// 自动处理心跳
+func GetSnapWSUpgrader() *snapws.Upgrader {
+	return snapws.NewUpgrader(&snapws.Options{
+		WriteWait:              5 * time.Second,
+		ReadWait:               60 * time.Second,
+		PingEvery:              50 * time.Second,
+		MaxMessageSize:         1 << 20,
+		ReadBufferSize:         4096,
+		WriteBufferSize:        4096,
+		BroadcastChannelsSize:  8,
+		BroadcastBackpressure:  snapws.BackpressureDrop,
+		SkipUTF8Validation:     false,
+	})
 }
