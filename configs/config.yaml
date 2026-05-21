@@ -3,8 +3,8 @@ server:
   mode: "release"
 
 database:
-  username: "postgres"
-  password: "zyz20050922"
+  username: "sleet"
+  password: "Zyz20050922!"
   host: "192.168.3.114"
   port: 5432
   dbname: "graduation_project"
