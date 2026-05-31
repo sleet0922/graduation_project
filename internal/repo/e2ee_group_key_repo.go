@@ -15,6 +15,7 @@ type E2EEGroupKeyRepository interface {
 	GetCurrentUserKeyBox(ctx context.Context, groupID, userID uint) (*model.E2EEGroupKeyBox, error)
 	GetUserKeyBoxByVersion(ctx context.Context, groupID uint, keyVersion int, userID uint) (*model.E2EEGroupKeyBox, error)
 	CreateNextVersion(ctx context.Context, groupID, createdBy uint) (*model.E2EEGroupKey, error)
+	GetVersionBoxes(ctx context.Context, groupID uint, keyVersion int) ([]*model.E2EEGroupKeyBox, error)
 	ReplaceVersionBoxes(ctx context.Context, groupID uint, keyVersion int, boxes []*model.E2EEGroupKeyBox) error
 }
 
@@ -113,6 +114,18 @@ func (r *e2eeGroupKeyRepository) CreateNextVersion(ctx context.Context, groupID,
 	return createdKey, nil
 }
 
+// 数据库 获取指定版本的所有密钥盒子
+func (r *e2eeGroupKeyRepository) GetVersionBoxes(ctx context.Context, groupID uint, keyVersion int) ([]*model.E2EEGroupKeyBox, error) {
+	var boxes []*model.E2EEGroupKeyBox
+	err := r.db.WithContext(ctx).
+		Where("group_id = ? AND key_version = ?", groupID, keyVersion).
+		Find(&boxes).Error
+	if err != nil {
+		return nil, err
+	}
+	return boxes, nil
+}
+
 // 数据库 替换指定版本的所有密钥盒
 func (r *e2eeGroupKeyRepository) ReplaceVersionBoxes(ctx context.Context, groupID uint, keyVersion int, boxes []*model.E2EEGroupKeyBox) error {
 	if len(boxes) == 0 {
@@ -125,7 +138,12 @@ func (r *e2eeGroupKeyRepository) ReplaceVersionBoxes(ctx context.Context, groupI
 			First(&key).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("group_id = ? AND key_version = ?", groupID, keyVersion).
+		// 只删除本次上传的用户的旧盒子，保留其他用户的盒子（如 self-wrap）
+		userIDs := make([]uint, 0, len(boxes))
+		for _, box := range boxes {
+			userIDs = append(userIDs, box.UserID)
+		}
+		if err := tx.Where("group_id = ? AND key_version = ? AND user_id IN ?", groupID, keyVersion, userIDs).
 			Delete(&model.E2EEGroupKeyBox{}).Error; err != nil {
 			return err
 		}

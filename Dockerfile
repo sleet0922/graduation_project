@@ -98,10 +98,13 @@ echo "Databases created:"
 psql -U postgres -c "\l"
 
 echo "Starting Redis..."
-redis-server --daemonize yes
+# 启动 Redis：关闭保护模式，绑定所有接口，无密码
+redis-server --daemonize yes \
+  --protected-mode no \
+  --bind 0.0.0.0
 
 echo "Waiting for Redis..."
-until redis-cli ping 2>/dev/null | grep -q PONG; do
+until redis-cli -h 127.0.0.1 ping 2>/dev/null | grep -q PONG; do
   sleep 1
 done
 

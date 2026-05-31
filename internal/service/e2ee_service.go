@@ -275,6 +275,15 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 		memberSet[member.UserID] = struct{}{}
 	}
 	seen := make(map[uint]struct{}, len(boxes))
+	// 检查哪些用户已经有密钥盒子（避免竞态条件导致不同用户用不同群密钥覆盖）
+	existingBoxes, err := s.groupKeyRepo.GetVersionBoxes(ctx, groupID, keyVersion)
+	if err != nil {
+		return err
+	}
+	existingUserIDs := make(map[uint]struct{}, len(existingBoxes))
+	for _, eb := range existingBoxes {
+		existingUserIDs[eb.UserID] = struct{}{}
+	}
 	modelBoxes := make([]*model.E2EEGroupKeyBox, 0, len(boxes))
 	for _, box := range boxes {
 		if box.UserID == 0 || strings.TrimSpace(box.WrappedGroupKey) == "" || strings.TrimSpace(box.WrapNonce) == "" {
@@ -285,6 +294,10 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 		}
 		if _, ok := seen[box.UserID]; ok {
 			return ErrE2EEGroupBoxesInvalid
+		}
+		// 如果目标用户已经有密钥盒子，跳过（避免竞态覆盖）
+		if _, exists := existingUserIDs[box.UserID]; exists {
+			continue
 		}
 		seen[box.UserID] = struct{}{}
 		wrappedRaw, err := decodeBase64URLOrStd(box.WrappedGroupKey)
@@ -305,8 +318,13 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 			WrappedByUserID: currentUserID, // 记录加密者（当前用户）的ID
 		})
 	}
-	if len(seen) != len(memberSet) {
+	// 允许只上传部分成员的密钥盒子（每个用户只上传其他成员的盒子，不覆盖自己的 self-wrap）
+	if len(seen) == 0 {
 		return ErrE2EEGroupBoxesInvalid
+	}
+	// 如果所有盒子都被跳过了（所有用户都已有盒子），不需要更新数据库
+	if len(modelBoxes) == 0 {
+		return nil
 	}
 	return s.groupKeyRepo.ReplaceVersionBoxes(ctx, groupID, keyVersion, modelBoxes)
 }
