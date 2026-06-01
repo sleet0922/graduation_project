@@ -1,6 +1,6 @@
 # ZAT API 文档
 
-> 基础地址: `https://api.gelsomino.cn`  
+> 基础地址: `https://api.gelsomino.cn:443`  
 > 协议: HTTPS · 数据格式: JSON · 编码: UTF-8
 
 ---
@@ -356,7 +356,7 @@ role: `owner` / `member`
 ### 连接
 
 ```
-wss://api.gelsomino.cn/ws/chat
+wss://api.gelsomino.cn:443/ws/chat
 ```
 
 认证: Header `Authorization: Bearer <token>`（主）或 `?token=<token>`（备）。
@@ -450,7 +450,7 @@ WebSocket 连接失败 401: 除 token 过期外，也可能是 session 失效（
 ### 连接
 
 ```
-wss://api.gelsomino.cn/ws/online
+wss://api.gelsomino.cn:443/ws/online
 ```
 
 认证同聊天 WS。连接成功收到 `{ "type": "connected", "user_id": N }`。心跳机制同上。
@@ -610,6 +610,215 @@ wss://api.gelsomino.cn/ws/online
 | group_id | uint | 否 | |
 
 **返回** `{ app_id, room_id, uid, token }`
+
+---
+
+## 九、朋友圈/动态 🔒
+
+> 所有接口均需认证。支持发布文字、图片、视频动态，点赞（Toggle）和评论（含回复）。
+
+### 数据模型
+
+**Post 动态**:
+```json
+{
+  "id": 1, "user_id": 24, "content": "文字内容",
+  "like_count": 5, "comment_count": 3,
+  "created_at": "2026-05-31T08:56:50+08:00",
+  "author": { "id": 24, "name": "未命名用户", "avatar": "..." },
+  "media": [
+    { "id": 1, "media_type": 1, "media_url": "https://cdn.gelsomino.cn/xxx.jpg", "sort_order": 0 }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| media_type | int | 1=图片 2=视频 |
+| sort_order | int | 排序，小的在前 |
+
+---
+
+### POST /api/feed/create
+
+发布动态。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| content | string | 否 | 文字内容（与 media 至少有一个不为空） |
+| media | []object | 否 | 媒体附件列表 |
+
+**media 元素**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| media_type | int | 是 | 1=图片 2=视频 |
+| media_url | string | 是 | OSS 上传后的 access_url |
+| sort_order | int | 否 | 排序，默认 0 |
+
+**请求示例**:
+```json
+// 纯文字
+{ "content": "今天天气真好！" }
+
+// 图文
+{
+  "content": "分享一组照片",
+  "media": [
+    { "media_type": 1, "media_url": "https://cdn.gelsomino.cn/chat/xxx.jpg", "sort_order": 0 },
+    { "media_type": 2, "media_url": "https://cdn.gelsomino.cn/chat/yyy.mp4", "sort_order": 1 }
+  ]
+}
+```
+
+**返回**: 完整 Post 对象（含 author 和 media）。
+
+---
+
+### DELETE /api/feed/delete
+
+删除自己的动态。
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| post_id | uint | 是 |
+
+> 非本人动态返回 403。
+
+---
+
+### GET /api/feed/detail
+
+查看动态详情（含点赞用户列表和评论）。
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| post_id | uint | 是（query） |
+
+**返回**: 完整 Post 对象，包含 `likes`（点赞用户列表）和 `comments`（最近 3 条评论）。
+
+---
+
+### GET /api/feed/list
+
+朋友圈列表，返回自己 + 所有好友的动态，按发布时间倒序。
+
+| 参数 | 类型 | 必填 | 默认值 |
+|------|------|------|--------|
+| page | int | 否 | 1 |
+| page_size | int | 否 | 20（最大 50） |
+
+**返回**:
+```json
+{
+  "list": [ Post, ... ],
+  "total": 10,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+---
+
+### GET /api/feed/my_posts
+
+查看自己发布的所有动态。
+
+| 参数 | 类型 | 必填 | 默认值 |
+|------|------|------|--------|
+| page | int | 否 | 1 |
+| page_size | int | 否 | 20（最大 50） |
+
+**返回**: 同上分页格式。
+
+---
+
+### POST /api/feed/like
+
+点赞 / 取消点赞（Toggle 模式）。已赞则取消，未赞则点赞。
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| post_id | uint | 是 |
+
+**返回**:
+```json
+{ "is_liked": true }   // true=已赞, false=已取消
+```
+
+> `like_count` 自动同步。
+
+---
+
+### POST /api/feed/comment
+
+发表评论或回复他人评论。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| post_id | uint | 是 | |
+| content | string | 是 | 评论内容 |
+| reply_to_id | uint | 否 | 回复某条评论的 ID |
+
+**请求示例**:
+```json
+// 直接评论
+{ "post_id": 1, "content": "写得真不错！👍" }
+
+// 回复评论
+{ "post_id": 1, "content": "谢谢支持！", "reply_to_id": 1 }
+```
+
+> `comment_count` 自动同步。
+
+---
+
+### DELETE /api/feed/comment
+
+删除自己的评论。
+
+| 参数 | 类型 | 必填 |
+|------|------|------|
+| comment_id | uint | 是 |
+
+---
+
+### GET /api/feed/comments
+
+获取某条动态的评论列表，按时间正序。
+
+| 参数 | 类型 | 必填 | 默认值 |
+|------|------|------|--------|
+| post_id | uint | 是（query） | |
+| page | int | 否 | 1 |
+| page_size | int | 否 | 20（最大 50） |
+
+**返回**:
+```json
+{
+  "list": [
+    {
+      "id": 3,
+      "post_id": 1,
+      "user_id": 24,
+      "content": "谢谢支持！",
+      "reply_to_id": 1,
+      "created_at": "2026-05-31T08:57:20+08:00",
+      "user": { "id": 24, "name": "未命名用户", "avatar": "" },
+      "reply_to": {
+        "id": 1,
+        "content": "写得真不错！👍",
+        "user": { "id": 24, "name": "未命名用户", "avatar": "" }
+      }
+    }
+  ],
+  "total": 3,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+> `reply_to` 仅在 `reply_to_id` 不为 null 时返回。
 
 ---
 

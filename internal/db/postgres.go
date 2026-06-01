@@ -45,6 +45,10 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 		&model.E2EEUserPublicKey{},
 		&model.E2EEGroupKey{},
 		&model.E2EEGroupKeyBox{},
+		&model.FeedPost{},
+		&model.FeedMedia{},
+		&model.FeedLike{},
+		&model.FeedComment{},
 	)
 	if err != nil {
 		logger.Fatal("数据库迁移失败", slog.Any("error", err))

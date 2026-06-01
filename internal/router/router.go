@@ -29,12 +29,14 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	groupRepo := repo.NewGroupRepository(db)
 	e2eeKeyRepo := repo.NewE2EEKeyRepository(db)
 	e2eeGroupKeyRepo := repo.NewE2EEGroupKeyRepository(db)
+	feedRepo := repo.NewFeedRepository(db)
 
 	userService := service.NewUserService(userRepo)
 	friendService := service.NewFriendService(friendRepo, userRepo)
 	chatService := service.NewChatService(friendRepo, groupRepo)
 	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo, friendRepo, chatService)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)
+	feedService := service.NewFeedService(feedRepo, userRepo)
 
 	rtcTokenTTL := time.Duration(cfg.RTC.TokenExpireSeconds) * time.Second
 	if rtcTokenTTL <= 0 {
@@ -55,6 +57,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	onlineHandler := handler.NewOnlineHandler(chatService)
 	rtcHandler := handler.NewRTCHandler(rtcService)
 	e2eeHandler := handler.NewE2EEHandler(e2eeService)
+	feedHandler := handler.NewFeedHandler(feedService)
 
 	r.POST("/api/user/register", userHandler.Register)
 	r.POST("/api/user/login", userHandler.Login)
@@ -98,6 +101,17 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	r.GET("/api/e2ee/group/key/current", jwtMiddleware.Auth(), e2eeHandler.GetGroupCurrentKey)
 	r.GET("/api/e2ee/group/key/by-version", jwtMiddleware.Auth(), e2eeHandler.GetGroupKeyByVersion)
 	r.POST("/api/user/delete", jwtMiddleware.Auth(), userHandler.Delete)
+
+	// ===================== 朋友圈/动态 =====================
+	r.POST("/api/feed/create", jwtMiddleware.Auth(), feedHandler.CreatePost)
+	r.DELETE("/api/feed/delete", jwtMiddleware.Auth(), feedHandler.DeletePost)
+	r.GET("/api/feed/detail", jwtMiddleware.Auth(), feedHandler.GetDetail)
+	r.GET("/api/feed/list", jwtMiddleware.Auth(), feedHandler.ListFeed)
+	r.GET("/api/feed/my_posts", jwtMiddleware.Auth(), feedHandler.ListMyPosts)
+	r.POST("/api/feed/like", jwtMiddleware.Auth(), feedHandler.ToggleLike)
+	r.POST("/api/feed/comment", jwtMiddleware.Auth(), feedHandler.CreateComment)
+	r.DELETE("/api/feed/comment", jwtMiddleware.Auth(), feedHandler.DeleteComment)
+	r.GET("/api/feed/comments", jwtMiddleware.Auth(), feedHandler.ListComments)
 
 	return r
 }
