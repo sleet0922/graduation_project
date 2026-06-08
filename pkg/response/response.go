@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sleet0922/graduation_project/pkg/errcode"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 type Response struct {
@@ -13,19 +13,19 @@ type Response struct {
 	Data    interface{} `json:"data"`
 }
 
-func Success(c *gin.Context, data interface{}, msg string) {
+func Success(c *fiber.Ctx, data interface{}, msg string) error {
 	if msg == "" {
 		msg = errcode.GetMsg(errcode.Success)
 	}
-	c.JSON(http.StatusOK, Response{
+	return c.Status(http.StatusOK).JSON(Response{
 		Code:    errcode.Success,
 		Message: msg,
 		Data:    data,
 	})
 }
 
-func Error(c *gin.Context, httpCode int, msg string) {
-	c.JSON(httpCode, Response{
+func Error(c *fiber.Ctx, httpCode int, msg string) error {
+	return c.Status(httpCode).JSON(Response{
 		Code:    httpCode,
 		Message: msg,
 		Data:    nil,
@@ -33,8 +33,8 @@ func Error(c *gin.Context, httpCode int, msg string) {
 }
 
 // 使用统一定义的业务错误码
-func Result(c *gin.Context, httpCode, errCode int, data interface{}) {
-	c.JSON(httpCode, Response{
+func Result(c *fiber.Ctx, httpCode, errCode int, data interface{}) error {
+	return c.Status(httpCode).JSON(Response{
 		Code:    errCode,
 		Message: errcode.GetMsg(uint16(errCode)),
 		Data:    data,

@@ -10,16 +10,19 @@ import (
 	"sleet0922/graduation_project/pkg/oss"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/websocket/v2"
 	"gorm.io/gorm"
 )
 
-func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
-	r := gin.New()
+func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
+	r := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+	})
 
-	r.Use(middleware.GinLogger())
-	r.Use(middleware.GinRecovery())
-	r.Use(middleware.CorsMiddleware())
+	r.Use(middleware.Logger())
+	r.Use(middleware.Recovery())
+	r.Use(middleware.Cors())
 
 	jwtManager := jwt.NewJWTManager(cfg.JWT.SecretKey)
 	jwtMiddleware := middleware.NewJWTMiddleware(jwtManager)
@@ -59,59 +62,72 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *gin.Engine {
 	e2eeHandler := handler.NewE2EEHandler(e2eeService)
 	feedHandler := handler.NewFeedHandler(feedService)
 
-	r.POST("/api/user/register", userHandler.Register)
-	r.POST("/api/user/login", userHandler.Login)
-	r.POST("/api/user/refresh", userHandler.RefreshToken)
-	r.GET("/api/oss/upload-url", jwtMiddleware.Auth(), ossHandler.GetUploadURL)
-	r.GET("/api/oss/download-url", ossHandler.GetDownloadURL)
-	r.GET("/ws/chat", jwtMiddleware.WSAuth(), chatHandler.Connect)
-	r.GET("/ws/online", jwtMiddleware.WSAuth(), onlineHandler.Connect)
-	r.POST("/api/chat/upload/image", jwtMiddleware.Auth(), ossHandler.UploadChatImage)
-	r.POST("/api/chat/upload/video", jwtMiddleware.Auth(), ossHandler.UploadChatVideo)
-	r.POST("/api/user/avatar_update", jwtMiddleware.Auth(), userHandler.UpdateAvatar)
-	r.POST("/api/user/name_update", jwtMiddleware.Auth(), userHandler.UpdateName)
-	r.POST("/api/user/password_update", jwtMiddleware.Auth(), userHandler.UpdatePassword)
-	r.POST("/api/user/profile_update", jwtMiddleware.Auth(), userHandler.UpdateProfile)
-	r.POST("/api/user/self", jwtMiddleware.Auth(), userHandler.GetSelf)
-	r.POST("/api/user/location", jwtMiddleware.Auth(), userHandler.ReportLocation)
-	r.GET("/api/user/search", jwtMiddleware.Auth(), userHandler.SearchUser)
-	r.POST("/api/friend/request", jwtMiddleware.Auth(), friendHandler.Create)
-	r.GET("/api/friend/requests", jwtMiddleware.Auth(), friendHandler.GetFriendRequests)
-	r.POST("/api/friend/handle", jwtMiddleware.Auth(), friendHandler.HandleFriendRequest)
-	r.POST("/api/friend/delete", jwtMiddleware.Auth(), friendHandler.Delete)
-	r.GET("/api/friend/list", jwtMiddleware.Auth(), friendHandler.GetByUserID)
-	r.POST("/api/friend/check", jwtMiddleware.Auth(), friendHandler.CheckFriendship)
-	r.POST("/api/friend/remark_update", jwtMiddleware.Auth(), friendHandler.UpdateRemark)
-	r.POST("/api/group/create", jwtMiddleware.Auth(), groupHandler.Create)
-	r.POST("/api/group/member/add", jwtMiddleware.Auth(), groupHandler.AddMembers)
-	r.POST("/api/group/member/remove", jwtMiddleware.Auth(), groupHandler.RemoveMember)
-	r.POST("/api/group/leave", jwtMiddleware.Auth(), groupHandler.Leave)
-	r.POST("/api/group/delete", jwtMiddleware.Auth(), groupHandler.Delete)
-	r.GET("/api/group/list", jwtMiddleware.Auth(), groupHandler.GetGroups)
-	r.GET("/api/group/members", jwtMiddleware.Auth(), groupHandler.GetMembers)
-	r.POST("/api/rtc/call/invite", jwtMiddleware.Auth(), rtcHandler.Invite)
-	r.POST("/api/rtc/call/accept", jwtMiddleware.Auth(), rtcHandler.Accept)
-	r.POST("/api/rtc/call/reject", jwtMiddleware.Auth(), rtcHandler.Reject)
-	r.POST("/api/rtc/call/cancel", jwtMiddleware.Auth(), rtcHandler.Cancel)
-	r.POST("/api/rtc/call/hangup", jwtMiddleware.Auth(), rtcHandler.Hangup)
-	r.POST("/api/rtc/token", jwtMiddleware.Auth(), rtcHandler.GetToken)
-	r.POST("/api/e2ee/keys/publish", jwtMiddleware.Auth(), e2eeHandler.PublishPublicKey)
-	r.GET("/api/e2ee/keys/public", jwtMiddleware.Auth(), e2eeHandler.GetPublicKey)
-	r.POST("/api/e2ee/group/key/publish", jwtMiddleware.Auth(), e2eeHandler.PublishGroupKeyBoxes)
-	r.GET("/api/e2ee/group/key/current", jwtMiddleware.Auth(), e2eeHandler.GetGroupCurrentKey)
-	r.GET("/api/e2ee/group/key/by-version", jwtMiddleware.Auth(), e2eeHandler.GetGroupKeyByVersion)
-	r.POST("/api/user/delete", jwtMiddleware.Auth(), userHandler.Delete)
+	// 公开路由
+	r.Post("/api/user/register", userHandler.Register)
+	r.Post("/api/user/login", userHandler.Login)
+	r.Post("/api/user/refresh", userHandler.RefreshToken)
+	r.Get("/api/oss/download-url", ossHandler.GetDownloadURL)
 
-	// ===================== 朋友圈/动态 =====================
-	r.POST("/api/feed/create", jwtMiddleware.Auth(), feedHandler.CreatePost)
-	r.DELETE("/api/feed/delete", jwtMiddleware.Auth(), feedHandler.DeletePost)
-	r.GET("/api/feed/detail", jwtMiddleware.Auth(), feedHandler.GetDetail)
-	r.GET("/api/feed/list", jwtMiddleware.Auth(), feedHandler.ListFeed)
-	r.GET("/api/feed/my_posts", jwtMiddleware.Auth(), feedHandler.ListMyPosts)
-	r.POST("/api/feed/like", jwtMiddleware.Auth(), feedHandler.ToggleLike)
-	r.POST("/api/feed/comment", jwtMiddleware.Auth(), feedHandler.CreateComment)
-	r.DELETE("/api/feed/comment", jwtMiddleware.Auth(), feedHandler.DeleteComment)
-	r.GET("/api/feed/comments", jwtMiddleware.Auth(), feedHandler.ListComments)
+	// 需要认证的路由
+	auth := jwtMiddleware.Auth()
+	r.Get("/api/oss/upload-url", auth, ossHandler.GetUploadURL)
+	r.Post("/api/chat/upload/image", auth, ossHandler.UploadChatImage)
+	r.Post("/api/chat/upload/video", auth, ossHandler.UploadChatVideo)
+	r.Post("/api/user/avatar_update", auth, userHandler.UpdateAvatar)
+	r.Post("/api/user/name_update", auth, userHandler.UpdateName)
+	r.Post("/api/user/password_update", auth, userHandler.UpdatePassword)
+	r.Post("/api/user/profile_update", auth, userHandler.UpdateProfile)
+	r.Post("/api/user/self", auth, userHandler.GetSelf)
+	r.Post("/api/user/location", auth, userHandler.ReportLocation)
+	r.Get("/api/user/search", auth, userHandler.SearchUser)
+	r.Post("/api/friend/request", auth, friendHandler.Create)
+	r.Get("/api/friend/requests", auth, friendHandler.GetFriendRequests)
+	r.Post("/api/friend/handle", auth, friendHandler.HandleFriendRequest)
+	r.Post("/api/friend/delete", auth, friendHandler.Delete)
+	r.Get("/api/friend/list", auth, friendHandler.GetByUserID)
+	r.Post("/api/friend/check", auth, friendHandler.CheckFriendship)
+	r.Post("/api/friend/remark_update", auth, friendHandler.UpdateRemark)
+	r.Post("/api/group/create", auth, groupHandler.Create)
+	r.Post("/api/group/member/add", auth, groupHandler.AddMembers)
+	r.Post("/api/group/member/remove", auth, groupHandler.RemoveMember)
+	r.Post("/api/group/leave", auth, groupHandler.Leave)
+	r.Post("/api/group/delete", auth, groupHandler.Delete)
+	r.Get("/api/group/list", auth, groupHandler.GetGroups)
+	r.Get("/api/group/members", auth, groupHandler.GetMembers)
+	r.Post("/api/rtc/call/invite", auth, rtcHandler.Invite)
+	r.Post("/api/rtc/call/accept", auth, rtcHandler.Accept)
+	r.Post("/api/rtc/call/reject", auth, rtcHandler.Reject)
+	r.Post("/api/rtc/call/cancel", auth, rtcHandler.Cancel)
+	r.Post("/api/rtc/call/hangup", auth, rtcHandler.Hangup)
+	r.Post("/api/rtc/token", auth, rtcHandler.GetToken)
+	r.Post("/api/e2ee/keys/publish", auth, e2eeHandler.PublishPublicKey)
+	r.Get("/api/e2ee/keys/public", auth, e2eeHandler.GetPublicKey)
+	r.Post("/api/e2ee/group/key/publish", auth, e2eeHandler.PublishGroupKeyBoxes)
+	r.Get("/api/e2ee/group/key/current", auth, e2eeHandler.GetGroupCurrentKey)
+	r.Get("/api/e2ee/group/key/by-version", auth, e2eeHandler.GetGroupKeyByVersion)
+	r.Post("/api/user/delete", auth, userHandler.Delete)
+
+	// 朋友圈/动态
+	r.Post("/api/feed/create", auth, feedHandler.CreatePost)
+	r.Delete("/api/feed/delete", auth, feedHandler.DeletePost)
+	r.Get("/api/feed/detail", auth, feedHandler.GetDetail)
+	r.Get("/api/feed/list", auth, feedHandler.ListFeed)
+	r.Get("/api/feed/my_posts", auth, feedHandler.ListMyPosts)
+	r.Post("/api/feed/like", auth, feedHandler.ToggleLike)
+	r.Post("/api/feed/comment", auth, feedHandler.CreateComment)
+	r.Delete("/api/feed/comment", auth, feedHandler.DeleteComment)
+	r.Get("/api/feed/comments", auth, feedHandler.ListComments)
+
+	// WebSocket 路由（需要 WSAuth 认证）
+	wsAuth := jwtMiddleware.WSAuth()
+	r.Use("/ws", wsAuth, func(c *fiber.Ctx) error {
+		if websocket.IsWebSocketUpgrade(c) {
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+	r.Get("/ws/chat", chatHandler.Connect())
+	r.Get("/ws/online", onlineHandler.Connect())
 
 	return r
 }
