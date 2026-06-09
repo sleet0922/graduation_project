@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 type E2EEHandler struct {
@@ -20,16 +20,16 @@ type E2EEHandler struct {
 }
 
 type publishGroupKeyBoxesRequest struct {
-	GroupID    uint                        `json:"group_id" binding:"required"`
-	KeyVersion int                         `json:"key_version" binding:"required"`
+	GroupID    uint                        `json:"group_id"`
+	KeyVersion int                         `json:"key_version"`
 	KeyWrapAlg string                      `json:"key_wrap_alg"`
-	Boxes      []publishGroupKeyBoxPayload `json:"boxes" binding:"required"`
+	Boxes      []publishGroupKeyBoxPayload `json:"boxes"`
 }
 
 type publishGroupKeyBoxPayload struct {
-	UserID          uint   `json:"user_id" binding:"required"`
-	WrappedGroupKey string `json:"wrapped_group_key" binding:"required"`
-	WrapNonce       string `json:"wrap_nonce" binding:"required"`
+	UserID          uint   `json:"user_id"`
+	WrappedGroupKey string `json:"wrapped_group_key"`
+	WrapNonce       string `json:"wrap_nonce"`
 }
 
 func NewE2EEHandler(e2eeService service.E2EEService) *E2EEHandler {
@@ -53,22 +53,22 @@ func parseIntQuery(raw string) (int, error) {
 	return v, nil
 }
 
-func (h *E2EEHandler) handleGroupKeyError(c *gin.Context, err error) {
+func (h *E2EEHandler) handleGroupKeyError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrE2EEGroupPermission):
-		response.Error(c, http.StatusForbidden, "你不在该群聊中")
+		return response.Error(c, http.StatusForbidden, "你不在该群聊中")
 	case errors.Is(err, service.ErrE2EEGroupKeyNotFound):
-		response.Error(c, http.StatusNotFound, "group key not initialized")
+		return response.Error(c, http.StatusNotFound, "group key not initialized")
 	case errors.Is(err, service.ErrE2EEGroupVersionAbsent):
-		response.Error(c, http.StatusNotFound, "e2ee group key version not found")
+		return response.Error(c, http.StatusNotFound, "e2ee group key version not found")
 	case errors.Is(err, service.ErrE2EEGroupKeyBoxMissing):
-		response.Error(c, http.StatusNotFound, "e2ee group key box not found")
+		return response.Error(c, http.StatusNotFound, "e2ee group key box not found")
 	case errors.Is(err, service.ErrE2EEGroupVersionLock):
-		response.Error(c, http.StatusConflict, "e2ee group key version conflict")
+		return response.Error(c, http.StatusConflict, "e2ee group key version conflict")
 	case errors.Is(err, service.ErrE2EEGroupBoxesInvalid):
-		response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
+		return response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
 	default:
-		response.Error(c, http.StatusInternalServerError, "服务端异常")
+		return response.Error(c, http.StatusInternalServerError, "服务端异常")
 	}
 }
 
@@ -98,35 +98,31 @@ func maskToken(raw string) string {
 // ----------E2EE handler 方法----------
 
 // 发布用户公钥
-func (h *E2EEHandler) PublishPublicKey(c *gin.Context) {
+func (h *E2EEHandler) PublishPublicKey(c *fiber.Ctx) error {
 	type publishKeyRequest struct {
-		KeyType   string `json:"key_type" binding:"required"`
-		PublicKey string `json:"public_key" binding:"required"`
+		KeyType   string `json:"key_type"`
+		PublicKey string `json:"public_key"`
 	}
 
 	var req publishKeyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.KeyType == "" || req.PublicKey == "" {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	key, err := h.e2eeService.PublishUserPublicKey(c.Request.Context(), userID, req.KeyType, req.PublicKey)
+	key, err := h.e2eeService.PublishUserPublicKey(c.Context(), userID, req.KeyType, req.PublicKey)
 	if err != nil {
 		if errors.Is(err, service.ErrUnsupportedE2EEKeyType) || errors.Is(err, service.ErrInvalidE2EEPublicKey) {
-			response.Error(c, http.StatusBadRequest, err.Error())
-			return
+			return response.Error(c, http.StatusBadRequest, err.Error())
 		}
-		response.Error(c, http.StatusInternalServerError, "服务端异常")
-		return
+		return response.Error(c, http.StatusInternalServerError, "服务端异常")
 	}
 
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"user_id":    key.UserID,
 		"key_type":   key.KeyType,
 		"updated_at": key.UpdatedAt.UTC().Format(time.RFC3339),
@@ -134,25 +130,22 @@ func (h *E2EEHandler) PublishPublicKey(c *gin.Context) {
 }
 
 // 获取用户公钥
-func (h *E2EEHandler) GetPublicKey(c *gin.Context) {
+func (h *E2EEHandler) GetPublicKey(c *fiber.Ctx) error {
 	userIDText := c.Query("user_id")
 	parsedID, err := strconv.ParseUint(userIDText, 10, 64)
 	if err != nil || parsedID == 0 {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
-	key, err := h.e2eeService.GetUserPublicKey(c.Request.Context(), uint(parsedID))
+	key, err := h.e2eeService.GetUserPublicKey(c.Context(), uint(parsedID))
 	if err != nil {
 		if errors.Is(err, service.ErrE2EEPublicKeyNotFound) {
-			response.Error(c, http.StatusNotFound, err.Error())
-			return
+			return response.Error(c, http.StatusNotFound, err.Error())
 		}
-		response.Error(c, http.StatusInternalServerError, "服务端异常")
-		return
+		return response.Error(c, http.StatusInternalServerError, "服务端异常")
 	}
 
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"user_id":    key.UserID,
 		"key_type":   key.KeyType,
 		"public_key": key.PublicKey,
@@ -160,39 +153,33 @@ func (h *E2EEHandler) GetPublicKey(c *gin.Context) {
 	}, "ok")
 }
 
-func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
+func (h *E2EEHandler) GetGroupCurrentKey(c *fiber.Ctx) error {
 	currentUserID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 	groupID, err := parseUintQuery(c.Query("group_id"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
-	box, err := h.e2eeService.GetGroupCurrentKeyBox(c.Request.Context(), currentUserID, groupID)
+	box, err := h.e2eeService.GetGroupCurrentKeyBox(c.Context(), currentUserID, groupID)
 	if err != nil {
-		// 如果是密钥盒子缺失，返回特殊状态码 428，提示客户端需要上传密钥
 		if errors.Is(err, service.ErrE2EEGroupKeyBoxMissing) {
-			version, verr := h.e2eeService.GetGroupCurrentVersion(c.Request.Context(), groupID)
+			version, verr := h.e2eeService.GetGroupCurrentVersion(c.Context(), groupID)
 			if verr != nil {
-				h.handleGroupKeyError(c, err)
-				return
+				return h.handleGroupKeyError(c, err)
 			}
-			c.JSON(428, gin.H{
+			return c.Status(428).JSON(fiber.Map{
 				"code":    428,
 				"message": "e2ee group key box not found, please upload key boxes",
-				"data": gin.H{
+				"data": fiber.Map{
 					"group_id":     groupID,
 					"key_version":  version,
 					"need_publish": true,
 				},
 			})
-			return
 		}
-		h.handleGroupKeyError(c, err)
-		return
+		return h.handleGroupKeyError(c, err)
 	}
 
 	wrappedKeyLen, wrappedKeyDecodeErr := decodedLenBase64URLOrStd(box.WrappedGroupKey)
@@ -215,7 +202,7 @@ func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
 		"key_wrap_alg", box.KeyWrapAlg,
 	)
 
-	payload := gin.H{
+	payload := fiber.Map{
 		"group_id":           box.GroupID,
 		"key_version":        box.KeyVersion,
 		"target_user_id":     box.UserID,
@@ -226,19 +213,17 @@ func (h *E2EEHandler) GetGroupCurrentKey(c *gin.Context) {
 	if box.KeyWrapAlg != "" {
 		payload["key_wrap_alg"] = box.KeyWrapAlg
 	}
-	response.Success(c, payload, "ok")
+	return response.Success(c, payload, "ok")
 }
 
-func (h *E2EEHandler) PublishGroupKeyBoxes(c *gin.Context) {
+func (h *E2EEHandler) PublishGroupKeyBoxes(c *fiber.Ctx) error {
 	currentUserID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 	var req publishGroupKeyBoxesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.GroupID == 0 || req.KeyVersion == 0 || len(req.Boxes) == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 	inputBoxes := make([]service.GroupKeyBoxUpload, 0, len(req.Boxes))
 	for _, box := range req.Boxes {
@@ -248,22 +233,21 @@ func (h *E2EEHandler) PublishGroupKeyBoxes(c *gin.Context) {
 			WrapNonce:       box.WrapNonce,
 		})
 	}
-	if err := h.e2eeService.PublishGroupKeyBoxes(c.Request.Context(), currentUserID, req.GroupID, req.KeyVersion, inputBoxes, req.KeyWrapAlg); err != nil {
+	if err := h.e2eeService.PublishGroupKeyBoxes(c.Context(), currentUserID, req.GroupID, req.KeyVersion, inputBoxes, req.KeyWrapAlg); err != nil {
 		switch {
 		case errors.Is(err, service.ErrE2EEGroupPermission):
-			response.Error(c, http.StatusForbidden, "你不在该群聊中")
+			return response.Error(c, http.StatusForbidden, "你不在该群聊中")
 		case errors.Is(err, service.ErrE2EEGroupKeyNotFound), errors.Is(err, service.ErrE2EEGroupVersionAbsent):
-			response.Error(c, http.StatusNotFound, "e2ee group key version not found")
+			return response.Error(c, http.StatusNotFound, "e2ee group key version not found")
 		case errors.Is(err, service.ErrE2EEGroupVersionLock):
-			response.Error(c, http.StatusConflict, "e2ee group key version conflict")
+			return response.Error(c, http.StatusConflict, "e2ee group key version conflict")
 		case errors.Is(err, service.ErrE2EEGroupBoxesInvalid):
-			response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
+			return response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
 		default:
-			response.Error(c, http.StatusInternalServerError, "服务端异常")
+			return response.Error(c, http.StatusInternalServerError, "服务端异常")
 		}
-		return
 	}
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"group_id":    req.GroupID,
 		"key_version": req.KeyVersion,
 		"box_count":   len(req.Boxes),
@@ -271,28 +255,24 @@ func (h *E2EEHandler) PublishGroupKeyBoxes(c *gin.Context) {
 }
 
 // 获取指定版本的群聊密钥
-func (h *E2EEHandler) GetGroupKeyByVersion(c *gin.Context) {
+func (h *E2EEHandler) GetGroupKeyByVersion(c *fiber.Ctx) error {
 	currentUserID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 	groupID, err := parseUintQuery(c.Query("group_id"))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 	keyVersion, err := parseIntQuery(c.Query("key_version"))
 	if err != nil || keyVersion <= 0 {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
-	box, err := h.e2eeService.GetGroupKeyBoxByVersion(c.Request.Context(), currentUserID, groupID, keyVersion)
+	box, err := h.e2eeService.GetGroupKeyBoxByVersion(c.Context(), currentUserID, groupID, keyVersion)
 	if err != nil {
-		h.handleGroupKeyError(c, err)
-		return
+		return h.handleGroupKeyError(c, err)
 	}
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"group_id":           box.GroupID,
 		"key_version":        box.KeyVersion,
 		"target_user_id":     box.UserID,

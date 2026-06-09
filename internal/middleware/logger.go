@@ -2,54 +2,20 @@ package middleware
 
 import (
 	"log/slog"
-	"net"
-	"net/http"
-	"net/http/httputil"
-	"os"
 	"runtime/debug"
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
-	"sleet0922/graduation_project/pkg/response"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
-
-func isError(err interface{}) bool {
-	if ne, ok := err.(*net.OpError); ok {
-		if se, ok := ne.Err.(*os.SyscallError); ok {
-			errStr := strings.ToLower(se.Error())
-			return strings.Contains(errStr, "broken pipe") || strings.Contains(errStr, "connection reset by peer")
-		}
-	}
-	return false
-}
-
-func GinLogger() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		query := maskTokenInQuery(c.Request.URL.RawQuery)
-		c.Next()
-		cost := time.Since(start)
-		logger.Info(path,
-			slog.Int("status", c.Writer.Status()),
-			slog.String("method", c.Request.Method),
-			slog.String("ip", c.ClientIP()),
-			slog.Duration("cost", cost),
-			slog.String("query", query),
-			slog.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
-		)
-	}
-}
 
 // maskTokenInQuery 脱敏 query 中的 token 参数，避免泄露到日志
 func maskTokenInQuery(raw string) string {
 	if raw == "" {
 		return raw
 	}
-	// 简单策略：如果包含 token=，将其后的值替换为 ***
 	i := strings.Index(raw, "token=")
 	if i == -1 {
 		return raw
@@ -61,29 +27,44 @@ func maskTokenInQuery(raw string) string {
 	return raw[:i+6] + "***" + raw[i+end:]
 }
 
-func GinRecovery() gin.HandlerFunc {
-	return func(c *gin.Context) {
+// Logger 请求日志中间件
+func Logger() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		start := time.Now()
+		path := c.Path()
+		query := maskTokenInQuery(string(c.Request().URI().QueryString()))
+
+		err := c.Next()
+
+		cost := time.Since(start)
+		logger.Info(path,
+			slog.Int("status", c.Response().StatusCode()),
+			slog.String("method", c.Method()),
+			slog.String("ip", c.IP()),
+			slog.Duration("cost", cost),
+			slog.String("query", query),
+		)
+		return err
+	}
+}
+
+// Recovery panic 恢复中间件
+func Recovery() fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		defer func() {
-			err := recover()
-			if err != nil {
-				req, _ := httputil.DumpRequest(c.Request, false)
-				if isError(err) {
-					logger.Error(c.Request.URL.Path, slog.Any("error", err), slog.String("request", string(req)))
-					if e, ok := err.(error); ok {
-						_ = c.Error(e)
-					}
-					c.Abort()
-					return
-				}
+			if r := recover(); r != nil {
 				logger.Error("[Recovery from panic]",
-					slog.Any("error", err),
-					slog.String("request", string(req)),
+					slog.Any("error", r),
+					slog.String("path", c.Path()),
 					slog.String("stack", string(debug.Stack())),
 				)
-				response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-				c.Abort()
+				_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"code":    errcode.InternalServerError,
+					"message": errcode.GetMsg(errcode.InternalServerError),
+					"data":    nil,
+				})
 			}
 		}()
-		c.Next()
+		return c.Next()
 	}
 }

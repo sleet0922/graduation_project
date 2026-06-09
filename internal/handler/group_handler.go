@@ -7,7 +7,7 @@ import (
 	"sleet0922/graduation_project/pkg/response"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 type GroupHandler struct {
@@ -20,178 +20,153 @@ func NewGroupHandler(groupService service.GroupService) *GroupHandler {
 
 // ----------GroupHandler 方法----------
 // 创建群聊
-func (h *GroupHandler) Create(c *gin.Context) {
+func (h *GroupHandler) Create(c *fiber.Ctx) error {
 	type createGroupRequest struct {
-		Name      string `json:"name" binding:"required"`
+		Name      string `json:"name"`
 		Avatar    string `json:"avatar"`
 		MemberIDs []uint `json:"member_ids"`
 	}
 
 	var req createGroupRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.Name == "" {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	group, err := h.groupService.CreateGroup(c.Request.Context(), userID, req.Name, req.Avatar, req.MemberIDs)
+	group, err := h.groupService.CreateGroup(c.Context(), userID, req.Name, req.Avatar, req.MemberIDs)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
-	response.Success(c, group, "创建群聊成功")
+	return response.Success(c, group, "创建群聊成功")
 }
 
 // 邀请加入群聊
-func (h *GroupHandler) AddMembers(c *gin.Context) {
+func (h *GroupHandler) AddMembers(c *fiber.Ctx) error {
 	type addGroupMembersRequest struct {
-		GroupID   uint   `json:"group_id" binding:"required"`
+		GroupID   uint   `json:"group_id"`
 		MemberIDs []uint `json:"member_ids"`
 	}
 
 	var req addGroupMembersRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.GroupID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	members, err := h.groupService.AddMembers(c.Request.Context(), userID, req.GroupID, req.MemberIDs)
+	members, err := h.groupService.AddMembers(c.Context(), userID, req.GroupID, req.MemberIDs)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
-	response.Success(c, members, "拉群成功")
+	return response.Success(c, members, "拉群成功")
 }
 
 // 移除群成员
-func (h *GroupHandler) RemoveMember(c *gin.Context) {
+func (h *GroupHandler) RemoveMember(c *fiber.Ctx) error {
 	type removeGroupMemberRequest struct {
-		GroupID  uint `json:"group_id" binding:"required"`
-		MemberID uint `json:"member_id" binding:"required"`
+		GroupID  uint `json:"group_id"`
+		MemberID uint `json:"member_id"`
 	}
 
 	var req removeGroupMemberRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.GroupID == 0 || req.MemberID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	err = h.groupService.RemoveMember(c.Request.Context(), userID, req.GroupID, req.MemberID)
+	err = h.groupService.RemoveMember(c.Context(), userID, req.GroupID, req.MemberID)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
-	response.Success(c, nil, "踢出群成员成功")
+	return response.Success(c, nil, "踢出群成员成功")
 }
 
 // 退出群聊
-func (h *GroupHandler) Leave(c *gin.Context) {
+func (h *GroupHandler) Leave(c *fiber.Ctx) error {
 	type leaveGroupRequest struct {
-		GroupID uint `json:"group_id" binding:"required"`
+		GroupID uint `json:"group_id"`
 	}
 
 	var req leaveGroupRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.GroupID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	err = h.groupService.LeaveGroup(c.Request.Context(), userID, req.GroupID)
+	err = h.groupService.LeaveGroup(c.Context(), userID, req.GroupID)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
-	response.Success(c, nil, "退出群聊成功")
+	return response.Success(c, nil, "退出群聊成功")
 }
 
-func (h *GroupHandler) Delete(c *gin.Context) {
+func (h *GroupHandler) Delete(c *fiber.Ctx) error {
 	type deleteGroupRequest struct {
-		GroupID uint `json:"group_id" binding:"required"`
+		GroupID uint `json:"group_id"`
 	}
 
 	var req deleteGroupRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.GroupID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	err = h.groupService.DeleteGroup(c.Request.Context(), userID, req.GroupID)
+	err = h.groupService.DeleteGroup(c.Context(), userID, req.GroupID)
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 
-	response.Success(c, nil, "删除群聊成功")
+	return response.Success(c, nil, "删除群聊成功")
 }
 
 // 获取群聊列表
-func (h *GroupHandler) GetGroups(c *gin.Context) {
+func (h *GroupHandler) GetGroups(c *fiber.Ctx) error {
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	groups, err := h.groupService.GetGroups(c.Request.Context(), userID)
+	groups, err := h.groupService.GetGroups(c.Context(), userID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "获取群聊列表失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "获取群聊列表失败")
 	}
-	response.Success(c, groups, "获取群聊列表成功")
+	return response.Success(c, groups, "获取群聊列表成功")
 }
 
 // 获取群成员列表
-func (h *GroupHandler) GetMembers(c *gin.Context) {
+func (h *GroupHandler) GetMembers(c *fiber.Ctx) error {
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
 	groupID, err := strconv.ParseUint(c.Query("group_id"), 10, 64)
 	if err != nil || groupID == 0 {
-		response.Error(c, http.StatusBadRequest, "无效的group_id")
-		return
+		return response.Error(c, http.StatusBadRequest, "无效的group_id")
 	}
 
-	members, err := h.groupService.GetMembers(c.Request.Context(), userID, uint(groupID))
+	members, err := h.groupService.GetMembers(c.Context(), userID, uint(groupID))
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
-	response.Success(c, members, "获取群成员成功")
+	return response.Success(c, members, "获取群成员成功")
 }

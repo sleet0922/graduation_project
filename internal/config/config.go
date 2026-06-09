@@ -15,7 +15,7 @@ type DatabaseConfig struct {
 	Charset  string `json:"charset"`
 }
 
-type GinPortConfig struct {
+type ServerConfig struct {
 	Port string `json:"port" mapstructure:"port"`
 	Mode string `json:"mode" mapstructure:"mode"`
 }
@@ -47,7 +47,7 @@ type LogConfig struct {
 }
 
 type ViperConfig struct {
-	Server   GinPortConfig  `json:"server"`
+	Server   ServerConfig   `json:"server"`
 	Database DatabaseConfig `json:"database"`
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`

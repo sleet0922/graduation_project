@@ -1,43 +1,26 @@
 package handler
 
 import (
-	"errors"
 	"fmt"
-	"time"
 
-	"github.com/gin-gonic/gin"
 	"sleet0922/graduation_project/pkg/logger"
-	"sleet0922/graduation_project/pkg/snapws"
+
+	"github.com/gofiber/fiber/v2"
 )
 
-// ErrUserIDNotFound 在 gin.Context 中未找到认证中间件注入的 user_id 时返回
-var ErrUserIDNotFound = errors.New("在 context 中未发现 user_id")
+// ErrUserIDNotFound 在 fiber.Ctx 中未找到认证中间件注入的 user_id 时返回
+var ErrUserIDNotFound = fmt.Errorf("在 context 中未发现 user_id")
 
-// GetUserID 从 gin.Context 中提取认证中间件注入的 user_id
-func GetUserID(c *gin.Context) (uint, error) {
-	userID, exists := c.Get("user_id")
-	if !exists {
+// GetUserID 从 fiber.Ctx 中提取认证中间件注入的 user_id
+func GetUserID(c *fiber.Ctx) (uint, error) {
+	userID, ok := c.Locals("user_id").(uint)
+	if !ok || userID == 0 {
 		logger.Warn("在 context 中未发现 user_id",
-			"path", c.Request.URL.Path,
-			"method", c.Request.Method,
-			"ip", c.ClientIP(),
+			"path", c.Path(),
+			"method", c.Method(),
+			"ip", c.IP(),
 		)
-		return 0, fmt.Errorf("%w", ErrUserIDNotFound)
+		return 0, ErrUserIDNotFound
 	}
-	return userID.(uint), nil
-}
-
-// 自动处理心跳
-func GetSnapWSUpgrader() *snapws.Upgrader {
-	return snapws.NewUpgrader(&snapws.Options{
-		WriteWait:              5 * time.Second,
-		ReadWait:               60 * time.Second,
-		PingEvery:              50 * time.Second,
-		MaxMessageSize:         1 << 20,
-		ReadBufferSize:         4096,
-		WriteBufferSize:        4096,
-		BroadcastChannelsSize:  8,
-		BroadcastBackpressure:  snapws.BackpressureDrop,
-		SkipUTF8Validation:     false,
-	})
+	return userID, nil
 }

@@ -7,7 +7,7 @@ import (
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/response"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
@@ -16,207 +16,176 @@ type FriendHandler struct {
 }
 
 func NewFriendHandler(friendService service.FriendService) *FriendHandler {
-	return &FriendHandler{
-		friendService: friendService,
-	}
+	return &FriendHandler{friendService: friendService}
 }
 
 // ----------好友 handler 方法----------
 // 发送好友申请
-func (h *FriendHandler) Create(c *gin.Context) {
+func (h *FriendHandler) Create(c *fiber.Ctx) error {
 	type CreateFriendRequest struct {
 		FriendID uint   `json:"friend_id"`
 		Account  string `json:"account"`
 	}
 
 	var req CreateFriendRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
 	if req.FriendID != 0 {
-		err = h.friendService.SendFriendRequest(c.Request.Context(), userID, req.FriendID)
+		err = h.friendService.SendFriendRequest(c.Context(), userID, req.FriendID)
 	} else if req.Account != "" {
-		req.FriendID, err = h.friendService.SendFriendRequestByAccount(c.Request.Context(), userID, req.Account)
+		req.FriendID, err = h.friendService.SendFriendRequestByAccount(c.Context(), userID, req.Account)
 	} else {
-		response.Error(c, http.StatusBadRequest, "缺少有效的好友信息")
-		return
+		return response.Error(c, http.StatusBadRequest, "缺少有效的好友信息")
 	}
 
 	if err != nil {
 		if errors.Is(err, service.ErrCannotAddSelf) || errors.Is(err, service.ErrAlreadyFriend) || errors.Is(err, service.ErrRequestExists) {
-			response.Error(c, http.StatusBadRequest, err.Error())
-			return
+			return response.Error(c, http.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUserNotFound) {
-			response.Error(c, http.StatusNotFound, "未找到该用户")
-			return
+			return response.Error(c, http.StatusNotFound, "未找到该用户")
 		}
-		response.Error(c, http.StatusInternalServerError, "发送好友申请失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "发送好友申请失败")
 	}
 
-	response.Success(c, nil, "好友申请已发送")
+	return response.Success(c, nil, "好友申请已发送")
 }
 
-func (h *FriendHandler) Delete(c *gin.Context) {
+func (h *FriendHandler) Delete(c *fiber.Ctx) error {
 	type DeleteFriendRequest struct {
-		FriendID uint `json:"friend_id" binding:"required"`
+		FriendID uint `json:"friend_id"`
 	}
 
 	var req DeleteFriendRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.FriendID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	err = h.friendService.RemoveFriend(c.Request.Context(), userID, req.FriendID)
+	err = h.friendService.RemoveFriend(c.Context(), userID, req.FriendID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "删除好友失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "删除好友失败")
 	}
 
-	response.Success(c, nil, "删除好友成功")
+	return response.Success(c, nil, "删除好友成功")
 }
 
 // 获取好友列表
-func (h *FriendHandler) GetByUserID(c *gin.Context) {
+func (h *FriendHandler) GetByUserID(c *fiber.Ctx) error {
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	friendDetails, err := h.friendService.GetFriendDetailsByUserID(c.Request.Context(), userID)
+	friendDetails, err := h.friendService.GetFriendDetailsByUserID(c.Context(), userID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "获取好友列表失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "获取好友列表失败")
 	}
 
-	response.Success(c, friendDetails, "获取好友列表成功")
+	return response.Success(c, friendDetails, "获取好友列表成功")
 }
 
 // 获取好友申请列表
-func (h *FriendHandler) GetFriendRequests(c *gin.Context) {
+func (h *FriendHandler) GetFriendRequests(c *fiber.Ctx) error {
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	requests, err := h.friendService.GetFriendRequestsByUserID(c.Request.Context(), userID)
+	requests, err := h.friendService.GetFriendRequestsByUserID(c.Context(), userID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "获取好友申请列表失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "获取好友申请列表失败")
 	}
 
-	response.Success(c, requests, "获取好友申请列表成功")
+	return response.Success(c, requests, "获取好友申请列表成功")
 }
 
-func (h *FriendHandler) HandleFriendRequest(c *gin.Context) {
+func (h *FriendHandler) HandleFriendRequest(c *fiber.Ctx) error {
 	type HandleFriendRequest struct {
-		RequestID uint `json:"request_id" binding:"required"`
-		Status    uint `json:"status" binding:"required"`
+		RequestID uint `json:"request_id"`
+		Status    uint `json:"status"`
 	}
 
 	var req HandleFriendRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.RequestID == 0 || req.Status == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	err = h.friendService.HandleFriendRequest(c.Request.Context(), userID, req.RequestID, req.Status)
+	err = h.friendService.HandleFriendRequest(c.Context(), userID, req.RequestID, req.Status)
 	if err != nil {
 		if errors.Is(err, service.ErrFriendRequestPermission) {
-			response.Error(c, http.StatusForbidden, err.Error())
-			return
+			return response.Error(c, http.StatusForbidden, err.Error())
 		}
 		if errors.Is(err, service.ErrInvalidFriendRequestStatus) {
-			response.Error(c, http.StatusBadRequest, err.Error())
-			return
+			return response.Error(c, http.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Error(c, http.StatusNotFound, "好友申请不存在")
-			return
+			return response.Error(c, http.StatusNotFound, "好友申请不存在")
 		}
-		response.Error(c, http.StatusInternalServerError, "处理好友申请失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "处理好友申请失败")
 	}
 
-	response.Success(c, nil, "处理好友申请成功")
+	return response.Success(c, nil, "处理好友申请成功")
 }
 
 // 检查好友关系
-func (h *FriendHandler) CheckFriendship(c *gin.Context) {
+func (h *FriendHandler) CheckFriendship(c *fiber.Ctx) error {
 	type CheckFriendshipRequest struct {
-		FriendID uint `json:"friend_id" binding:"required"`
+		FriendID uint `json:"friend_id"`
 	}
 
 	var req CheckFriendshipRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.FriendID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	isFriend := h.friendService.CheckFriendship(c.Request.Context(), userID, req.FriendID)
+	isFriend := h.friendService.CheckFriendship(c.Context(), userID, req.FriendID)
 
-	response.Success(c, gin.H{"is_friend": isFriend}, "检查好友关系成功")
+	return response.Success(c, fiber.Map{"is_friend": isFriend}, "检查好友关系成功")
 }
 
 // 更新好友备注
-func (h *FriendHandler) UpdateRemark(c *gin.Context) {
+func (h *FriendHandler) UpdateRemark(c *fiber.Ctx) error {
 	type UpdateRemarkRequest struct {
-		FriendID uint   `json:"friend_id" binding:"required"`
+		FriendID uint   `json:"friend_id"`
 		Remark   string `json:"remark"`
 	}
 
 	var req UpdateRemarkRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "参数错误")
-		return
+	if err := c.BodyParser(&req); err != nil || req.FriendID == 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	err = h.friendService.UpdateRemark(c.Request.Context(), userID, req.FriendID, req.Remark)
+	err = h.friendService.UpdateRemark(c.Context(), userID, req.FriendID, req.Remark)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "修改好友备注失败")
-		return
+		return response.Error(c, http.StatusInternalServerError, "修改好友备注失败")
 	}
 
-	response.Success(c, nil, "修改好友备注成功")
+	return response.Success(c, nil, "修改好友备注成功")
 }

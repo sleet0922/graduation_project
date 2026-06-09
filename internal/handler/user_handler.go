@@ -14,7 +14,7 @@ import (
 	"sleet0922/graduation_project/pkg/response"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 type UserHandler struct {
@@ -53,41 +53,35 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager,
 
 // ----------用户 handler 方法----------
 // 获取当前用户信息
-func (h *UserHandler) GetSelf(c *gin.Context) {
+func (h *UserHandler) GetSelf(c *fiber.Ctx) error {
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
-	user, err := h.userService.GetSelf(c.Request.Context(), userID)
+	user, err := h.userService.GetSelf(c.Context(), userID)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
-			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
-			return
+			return response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
 		}
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, user, "获取用户信息成功")
+	return response.Success(c, user, "获取用户信息成功")
 }
 
 // 搜索用户
-func (h *UserHandler) SearchUser(c *gin.Context) {
+func (h *UserHandler) SearchUser(c *fiber.Ctx) error {
 	keyword := c.Query("keyword")
 	if keyword == "" {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
-	user, err := h.userService.SearchUser(c.Request.Context(), keyword)
+	user, err := h.userService.SearchUser(c.Context(), keyword)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
-			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
-			return
+			return response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
 		}
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"id":       user.ID,
 		"account":  user.Account,
 		"name":     user.Name,
@@ -100,27 +94,23 @@ func (h *UserHandler) SearchUser(c *gin.Context) {
 }
 
 // 用户注册
-func (h *UserHandler) Register(c *gin.Context) {
+func (h *UserHandler) Register(c *fiber.Ctx) error {
 	type RegisterRequest struct {
-		Email    string `json:"email" binding:"required"`
-		Password string `json:"password" binding:"required"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	var req RegisterRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil || req.Email == "" || req.Password == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
-	user, err := h.userService.Register(c.Request.Context(), req.Email, req.Password)
+	user, err := h.userService.Register(c.Context(), req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrUserAlreadyExists) {
-			response.Result(c, http.StatusOK, errcode.ErrorUserExist, nil)
-			return
+			return response.Result(c, http.StatusOK, errcode.ErrorUserExist, nil)
 		}
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"id":      user.ID,
 		"account": user.Account,
 		"name":    user.Name,
@@ -129,25 +119,21 @@ func (h *UserHandler) Register(c *gin.Context) {
 }
 
 // 用户登录
-func (h *UserHandler) Login(c *gin.Context) {
+func (h *UserHandler) Login(c *fiber.Ctx) error {
 	type LoginRequest struct {
-		Account  string `json:"account" binding:"required"`
-		Password string `json:"password" binding:"required"`
+		Account  string `json:"account"`
+		Password string `json:"password"`
 	}
 	var req LoginRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil || req.Account == "" || req.Password == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
-	user, err := h.userService.Login(c.Request.Context(), req.Account, req.Password)
+	user, err := h.userService.Login(c.Context(), req.Account, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
-			response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
-			return
+			return response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
 		}
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 	sessionID := generateSessionID()
 	_, err = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
@@ -160,22 +146,20 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	accessToken, err := h.jwtManager.GenerateTokenWithSession(user.ID, user.Account, jwt.TokenTypeAccess, sessionID, h.accessTokenExpiresIn)
 	if err != nil {
-		response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
 	refreshToken, err := h.jwtManager.GenerateTokenWithSession(user.ID, user.Account, jwt.TokenTypeRefresh, sessionID, h.refreshTokenExpiresIn)
 	if err != nil {
-		response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
 
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"token":              accessToken,
 		"refresh_token":      refreshToken,
 		"expires_in":         int(h.accessTokenExpiresIn.Seconds()),
 		"refresh_expires_in": int(h.refreshTokenExpiresIn.Seconds()),
 		"session_id":         sessionID,
-		"user": gin.H{
+		"user": fiber.Map{
 			"id":       user.ID,
 			"account":  user.Account,
 			"name":     user.Name,
@@ -189,10 +173,10 @@ func (h *UserHandler) Login(c *gin.Context) {
 }
 
 // 用户位置
-func (h *UserHandler) ReportLocation(c *gin.Context) {
+func (h *UserHandler) ReportLocation(c *fiber.Ctx) error {
 	type LocationRequest struct {
-		Latitude  float64 `json:"latitude" binding:"required"`
-		Longitude float64 `json:"longitude" binding:"required"`
+		Latitude  float64 `json:"latitude"`
+		Longitude float64 `json:"longitude"`
 		Province  string  `json:"province"`
 		City      string  `json:"city"`
 		District  string  `json:"district"`
@@ -201,15 +185,13 @@ func (h *UserHandler) ReportLocation(c *gin.Context) {
 	}
 
 	var req LocationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
 	location := &model.UserLocation{
@@ -223,10 +205,9 @@ func (h *UserHandler) ReportLocation(c *gin.Context) {
 		Timestamp: req.Timestamp,
 	}
 
-	if err := h.userService.UpsertLocation(c.Request.Context(), location); err != nil {
+	if err := h.userService.UpsertLocation(c.Context(), location); err != nil {
 		slog.Error("Failed to save user location", slog.Any("error", err), slog.Any("user_id", userID))
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 
 	slog.Info("Received and saved user location report",
@@ -240,35 +221,31 @@ func (h *UserHandler) ReportLocation(c *gin.Context) {
 		slog.Int64("timestamp", req.Timestamp),
 	)
 
-	response.Success(c, nil, "上报成功")
+	return response.Success(c, nil, "上报成功")
 }
 
 // 用户刷新token
-func (h *UserHandler) RefreshToken(c *gin.Context) {
+func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 	type RefreshTokenRequest struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	var req RefreshTokenRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil || req.RefreshToken == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 
 	accessToken, err := h.jwtManager.RefreshAccessToken(req.RefreshToken, h.accessTokenExpiresIn)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 	}
 
 	refreshToken, err := h.jwtManager.RotateRefreshToken(req.RefreshToken, h.refreshTokenExpiresIn)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 	}
 
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"token":              accessToken,
 		"refresh_token":      refreshToken,
 		"expires_in":         int(h.accessTokenExpiresIn.Seconds()),
@@ -277,91 +254,77 @@ func (h *UserHandler) RefreshToken(c *gin.Context) {
 }
 
 // 用户更新头像
-func (h *UserHandler) UpdateAvatar(c *gin.Context) {
+func (h *UserHandler) UpdateAvatar(c *fiber.Ctx) error {
 	type UpdateAvatarRequest struct {
-		Avatar string `json:"avatar" binding:"required"`
+		Avatar string `json:"avatar"`
 	}
 
 	var req UpdateAvatarRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil || req.Avatar == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
-	user, err := h.userService.UpdateAvatar(c.Request.Context(), userID, req.Avatar)
+	user, err := h.userService.UpdateAvatar(c.Context(), userID, req.Avatar)
 	if err != nil {
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, gin.H{"id": user.ID, "object_key": user.Avatar}, "更新头像成功")
+	return response.Success(c, fiber.Map{"id": user.ID, "object_key": user.Avatar}, "更新头像成功")
 }
 
 // 用户更新用户名
-func (h *UserHandler) UpdateName(c *gin.Context) {
+func (h *UserHandler) UpdateName(c *fiber.Ctx) error {
 	type UpdateNameRequest struct {
-		Name string `json:"name" binding:"required"`
+		Name string `json:"name"`
 	}
 
 	var req UpdateNameRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil || req.Name == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
-	user, err := h.userService.UpdateName(c.Request.Context(), userID, req.Name)
+	user, err := h.userService.UpdateName(c.Context(), userID, req.Name)
 	if err != nil {
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, gin.H{"id": user.ID, "name": user.Name}, "更新用户名成功")
+	return response.Success(c, fiber.Map{"id": user.ID, "name": user.Name}, "更新用户名成功")
 }
 
 // 用户更新密码
-func (h *UserHandler) UpdatePassword(c *gin.Context) {
+func (h *UserHandler) UpdatePassword(c *fiber.Ctx) error {
 	type UpdatePasswordRequest struct {
-		Password    string `json:"password" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required"`
+		Password    string `json:"password"`
+		NewPassword string `json:"new_password"`
 	}
 
 	var req UpdatePasswordRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil || req.Password == "" || req.NewPassword == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
-	err = h.userService.UpdatePassword(c.Request.Context(), userID, req.Password, req.NewPassword)
+	err = h.userService.UpdatePassword(c.Context(), userID, req.Password, req.NewPassword)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
-			response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
-			return
+			return response.Result(c, http.StatusNotFound, errcode.ErrorUserNotExist, nil)
 		}
 		if errors.Is(err, service.ErrOldPasswordIncorrect) {
-			response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
-			return
+			return response.Result(c, http.StatusUnauthorized, errcode.ErrorPasswordCheck, nil)
 		}
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, nil, "更新密码成功")
+	return response.Success(c, nil, "更新密码成功")
 }
 
 // 用户更新资料
-func (h *UserHandler) UpdateProfile(c *gin.Context) {
+func (h *UserHandler) UpdateProfile(c *fiber.Ctx) error {
 	type UpdateProfileRequest struct {
 		Gender   int    `json:"gender"`
 		Birthday string `json:"birthday"`
@@ -369,22 +332,18 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	var req UpdateProfileRequest
-	err := c.ShouldBindJSON(&req)
-	if err != nil {
-		response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
-	user, err := h.userService.UpdateProfile(c.Request.Context(), userID, req.Gender, req.Birthday, req.Location)
+	user, err := h.userService.UpdateProfile(c.Context(), userID, req.Gender, req.Birthday, req.Location)
 	if err != nil {
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, gin.H{
+	return response.Success(c, fiber.Map{
 		"id":       user.ID,
 		"gender":   user.Gender,
 		"birthday": user.Birthday,
@@ -393,16 +352,14 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 }
 
 // 用户删除
-func (h *UserHandler) Delete(c *gin.Context) {
+func (h *UserHandler) Delete(c *fiber.Ctx) error {
 	userID, err := GetUserID(c)
 	if err != nil {
-		response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
-		return
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
-	err = h.userService.Delete(c.Request.Context(), userID)
+	err = h.userService.Delete(c.Context(), userID)
 	if err != nil {
-		response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
-		return
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	response.Success(c, nil, "删除用户成功")
+	return response.Success(c, nil, "删除用户成功")
 }
