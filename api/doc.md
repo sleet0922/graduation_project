@@ -52,7 +52,7 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 
 ### POST /api/user/register
 
-注册账号。系统自动生成 10 位数字账号。
+注册账号。系统自动生成 10 位数字账号，昵称默认为"未命名用户"。
 
 | 参数 | 类型 | 必填 |
 |------|------|------|
@@ -108,6 +108,8 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 
 获取当前登录用户完整信息。
 
+**返回** `{ id, account, name, avatar, email, gender, birthday, location }`
+
 ---
 
 ### GET /api/user/search  🔒
@@ -128,6 +130,8 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 |------|------|------|
 | name | string | 是 |
 
+**返回** `{ id, name }`
+
 ---
 
 ### POST /api/user/avatar_update  🔒
@@ -137,6 +141,8 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 | avatar | string | 是 |
 
 值为 OSS 上传返回的文件名（如 `avatar_6_1776183103821.jpg`）。
+
+**返回** `{ id, object_key }`
 
 ---
 
@@ -156,6 +162,24 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 | gender | int | 否 | 0=未知 1=男 2=女 |
 | birthday | string | 否 | 格式 YYYY-MM-DD |
 | location | string | 否 | 地区 |
+
+**返回** `{ id, gender, birthday, location }`
+
+---
+
+### POST /api/user/location  🔒
+
+上报用户地理位置。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| latitude | float | 是 | 纬度 |
+| longitude | float | 是 | 经度 |
+| province | string | 否 | 省份 |
+| city | string | 否 | 城市 |
+| district | string | 否 | 区/县 |
+| address | string | 否 | 详细地址 |
+| timestamp | int64 | 否 | Unix 时间戳（秒） |
 
 ---
 
@@ -198,9 +222,11 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 
 直传聊天图片（multipart/form-data）。
 
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| file | file | 是 |
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| file | file | 是 | 最大 10MB，支持 image/* 或 application/octet-stream |
+
+**返回** `{ url, content, filename, contentType }`
 
 ---
 
@@ -208,9 +234,11 @@ WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`
 
 直传聊天视频（multipart/form-data）。
 
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| file | file | 是 |
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| file | file | 是 | 最大 100MB，支持 video/* 或 application/octet-stream |
+
+**返回** `{ url, content, filename, contentType }`
 
 ---
 
@@ -299,6 +327,8 @@ status: `0`=待处理 `1`=已接受 `2`=已拒绝
 
 当前用户加入的所有群聊。
 
+**返回** `[{ id, name, avatar, owner_id, member_count, created_at, updated_at }]`
+
 ---
 
 ### GET /api/group/members  🔒
@@ -319,6 +349,8 @@ role: `owner` / `member`
 |------|------|------|
 | group_id | uint | 是 |
 | member_ids | []uint | 是（必须是好友） |
+
+**返回**: 群成员列表（同上格式）
 
 ---
 
@@ -365,7 +397,8 @@ wss://api.gelsomino.cn:443/ws/chat
 
 ### 心跳
 
-服务端每 5s 发 Ping 帧，3s 内未收到 Pong 则断开。
+- **服务端**: 每 5s 发 Ping 帧，3s 内未收到 Pong 则断开。
+- **客户端**: 可主动发送 `{ "type": "ping" }`，服务端回复 `{ "type": "pong" }`。
 
 ---
 
@@ -510,7 +543,7 @@ wss://api.gelsomino.cn:443/ws/online
 |------|------|------|
 | group_id | uint | 是（query） |
 
-**正常返回** `{ group_id, key_version, target_user_id, wrapped_group_key, wrap_nonce, wrapped_by_user_id, key_wrap_alg }`
+**正常返回** `{ group_id, key_version, target_user_id, wrapped_group_key, wrap_nonce, wrapped_by_user_id }`，若 `key_wrap_alg` 非空则一并返回。
 
 **若未上传密钥盒子 → 428** + `{ group_id, key_version, need_publish: true }`，提示前端调用发布接口。
 
@@ -533,6 +566,8 @@ wss://api.gelsomino.cn:443/ws/online
 | wrapped_group_key | string | 是 |
 | wrap_nonce | string | 是 |
 
+**返回** `{ group_id, key_version, box_count }`
+
 ---
 
 ### GET /api/e2ee/group/key/by-version  🔒
@@ -548,6 +583,20 @@ wss://api.gelsomino.cn:443/ws/online
 
 ## 八、RTC 实时通话
 
+RTC 相关 WebSocket 推送事件（通过聊天 WS 通道下发）：
+
+| 事件类型 | 方向 | 说明 |
+|---------|------|------|
+| `rtc_invite` | 服务端→被叫 | 来电邀请，含 `call_id`、`room_id`、`call_type`、`from_user_id`、`from_name`、`avatar` |
+| `rtc_accept` | 服务端→主叫 | 对方已接听 |
+| `rtc_reject` | 服务端→主叫 | 对方已拒绝 |
+| `rtc_busy` | 服务端→主叫 | 对方忙线 |
+| `rtc_cancel` | 服务端→被叫 | 主叫取消 |
+| `rtc_hangup` | 服务端→对方 | 通话挂断 |
+| `rtc_timeout` | 服务端→双方 | 45s 超时未接听 |
+
+---
+
 ### POST /api/rtc/call/invite  🔒
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -558,6 +607,8 @@ wss://api.gelsomino.cn:443/ws/online
 
 **返回** `{ call_id, room_id, call_type, peer_id, group_id }`
 
+> 单聊需对方在线且为好友，群聊需至少一个在线成员。45s 内无人接听自动超时。
+
 ---
 
 ### POST /api/rtc/call/accept  🔒
@@ -565,6 +616,8 @@ wss://api.gelsomino.cn:443/ws/online
 | 参数 | 类型 | 必填 |
 |------|------|------|
 | call_id | string | 是 |
+
+**返回** `{ call_id, room_id }`
 
 ---
 
@@ -594,6 +647,8 @@ wss://api.gelsomino.cn:443/ws/online
 | 参数 | 类型 | 必填 |
 |------|------|------|
 | call_id | string | 是 |
+
+> 未接通前主叫方请使用 cancel 接口。
 
 ---
 
@@ -639,7 +694,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### POST /api/feed/create
+### POST /api/feed/create  🔒
 
 发布动态。
 
@@ -675,7 +730,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### DELETE /api/feed/delete
+### DELETE /api/feed/delete  🔒
 
 删除自己的动态。
 
@@ -687,7 +742,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### GET /api/feed/detail
+### GET /api/feed/detail  🔒
 
 查看动态详情（含点赞用户列表和评论）。
 
@@ -699,7 +754,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### GET /api/feed/list
+### GET /api/feed/list  🔒
 
 朋友圈列表，返回自己 + 所有好友的动态，按发布时间倒序。
 
@@ -720,7 +775,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### GET /api/feed/my_posts
+### GET /api/feed/my_posts  🔒
 
 查看自己发布的所有动态。
 
@@ -733,7 +788,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### POST /api/feed/like
+### POST /api/feed/like  🔒
 
 点赞 / 取消点赞（Toggle 模式）。已赞则取消，未赞则点赞。
 
@@ -750,7 +805,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### POST /api/feed/comment
+### POST /api/feed/comment  🔒
 
 发表评论或回复他人评论。
 
@@ -758,12 +813,12 @@ wss://api.gelsomino.cn:443/ws/online
 |------|------|------|------|
 | post_id | uint | 是 | |
 | content | string | 是 | 评论内容 |
-| reply_to_id | uint | 否 | 回复某条评论的 ID |
+| reply_to_id | uint | 否 | 回复某条评论的 ID，传 null 或不传表示直接评论 |
 
 **请求示例**:
 ```json
 // 直接评论
-{ "post_id": 1, "content": "写得真不错！👍" }
+{ "post_id": 1, "content": "写得真不错！" }
 
 // 回复评论
 { "post_id": 1, "content": "谢谢支持！", "reply_to_id": 1 }
@@ -773,7 +828,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### DELETE /api/feed/comment
+### DELETE /api/feed/comment  🔒
 
 删除自己的评论。
 
@@ -783,7 +838,7 @@ wss://api.gelsomino.cn:443/ws/online
 
 ---
 
-### GET /api/feed/comments
+### GET /api/feed/comments  🔒
 
 获取某条动态的评论列表，按时间正序。
 
@@ -807,7 +862,7 @@ wss://api.gelsomino.cn:443/ws/online
       "user": { "id": 24, "name": "未命名用户", "avatar": "" },
       "reply_to": {
         "id": 1,
-        "content": "写得真不错！👍",
+        "content": "写得真不错！",
         "user": { "id": 24, "name": "未命名用户", "avatar": "" }
       }
     }
@@ -824,6 +879,8 @@ wss://api.gelsomino.cn:443/ws/online
 
 ## 附录: 错误码
 
+### HTTP 状态码
+
 | HTTP | 说明 |
 |------|------|
 | 200 | 成功 |
@@ -831,15 +888,24 @@ wss://api.gelsomino.cn:443/ws/online
 | 401 | 未授权 |
 | 403 | 权限不足 |
 | 404 | 资源不存在 |
-| 409 | 冲突 |
+| 409 | 冲突（如忙线、版本冲突） |
 | 428 | 需上传 E2EE 密钥盒子 |
 | 500 | 服务端错误 |
 
+### 业务码
+
 | 业务码 | 说明 |
 |--------|------|
+| 400 | 请求参数错误 |
+| 401 | 未授权 |
+| 403 | 禁止访问 |
+| 404 | 资源不存在 |
+| 500 | 服务器内部错误 |
 | 10001 | 用户已存在 |
 | 10002 | 用户不存在 |
 | 10003 | 密码错误 |
 | 10004 | Token 生成失败 |
 | 10005 | Token 解析失败 |
 | 10006 | Token 已过期 |
+
+> 注：业务码 400/401/403/404/500 与 HTTP 状态码含义一致，用于响应 body 中的 `code` 字段。
