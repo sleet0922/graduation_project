@@ -23,11 +23,12 @@ type FeedRepository interface {
 	DeleteMediaByPostID(ctx context.Context, postID uint) error
 
 	// 点赞
-	CreateLike(ctx context.Context, like *model.FeedLike) error
-	DeleteLike(ctx context.Context, postID uint, userID uint) error
+	CreateLike(ctx context.Context, like *model.FeedLike) (int64, error)  // 返回受影响行数
+	DeleteLike(ctx context.Context, postID uint, userID uint) (int64, error) // 返回受影响行数
 	IsLiked(ctx context.Context, postID uint, userID uint) (bool, error)
 	IncrementLikeCount(ctx context.Context, postID uint) error
 	DecrementLikeCount(ctx context.Context, postID uint) error
+	BatchIsLiked(ctx context.Context, postIDs []uint, userID uint) (map[uint]bool, error)
 
 	// 评论
 	CreateComment(ctx context.Context, comment *model.FeedComment) error
@@ -162,19 +163,24 @@ func (r *feedRepository) DeleteMediaByPostID(ctx context.Context, postID uint) e
 
 // ===================== 点赞 =====================
 
-func (r *feedRepository) CreateLike(ctx context.Context, like *model.FeedLike) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+// CreateLike 创建点赞（INSERT ON CONFLICT DO NOTHING，返回受影响行数用于判断是否真正插入）
+func (r *feedRepository) CreateLike(ctx context.Context, like *model.FeedLike) (int64, error) {
+	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "post_id"}, {Name: "user_id"}},
 		DoNothing: true,
-	}).Create(like).Error
+	}).Create(like)
+	return result.RowsAffected, result.Error
 }
 
-func (r *feedRepository) DeleteLike(ctx context.Context, postID uint, userID uint) error {
-	return r.db.WithContext(ctx).
+// DeleteLike 硬删除点赞记录（Unscoped 绕过软删除，返回受影响行数用于判断是否真正删除）
+func (r *feedRepository) DeleteLike(ctx context.Context, postID uint, userID uint) (int64, error) {
+	result := r.db.WithContext(ctx).
 		Where("post_id = ? AND user_id = ?", postID, userID).
-		Delete(&model.FeedLike{}).Error
+		Delete(&model.FeedLike{})
+	return result.RowsAffected, result.Error
 }
 
+// IsLiked 查询当前用户是否已点赞某帖子
 func (r *feedRepository) IsLiked(ctx context.Context, postID uint, userID uint) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.FeedLike{}).
@@ -183,16 +189,38 @@ func (r *feedRepository) IsLiked(ctx context.Context, postID uint, userID uint) 
 	return count > 0, err
 }
 
+// IncrementLikeCount 帖子点赞数 +1
 func (r *feedRepository) IncrementLikeCount(ctx context.Context, postID uint) error {
 	return r.db.WithContext(ctx).Model(&model.FeedPost{}).
 		Where("id = ?", postID).
 		UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error
 }
 
+// DecrementLikeCount 帖子点赞数 -1（带 like_count > 0 防护）
 func (r *feedRepository) DecrementLikeCount(ctx context.Context, postID uint) error {
 	return r.db.WithContext(ctx).Model(&model.FeedPost{}).
 		Where("id = ? AND like_count > 0", postID).
 		UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error
+}
+
+// BatchIsLiked 批量查询当前用户对多个帖子的点赞状态，返回 map[postID]bool
+func (r *feedRepository) BatchIsLiked(ctx context.Context, postIDs []uint, userID uint) (map[uint]bool, error) {
+	if len(postIDs) == 0 {
+		return make(map[uint]bool), nil
+	}
+	var likes []model.FeedLike
+	err := r.db.WithContext(ctx).
+		Select("post_id").
+		Where("post_id IN ? AND user_id = ?", postIDs, userID).
+		Find(&likes).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uint]bool, len(likes))
+	for _, l := range likes {
+		result[l.PostID] = true
+	}
+	return result, nil
 }
 
 // ===================== 评论 =====================

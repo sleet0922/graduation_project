@@ -39,7 +39,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	chatService := service.NewChatService(friendRepo, groupRepo)
 	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo, friendRepo, chatService)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)
-	feedService := service.NewFeedService(feedRepo, userRepo)
+	feedService := service.NewFeedService(feedRepo, userRepo, db)
 
 	rtcTokenTTL := time.Duration(cfg.RTC.TokenExpireSeconds) * time.Second
 	if rtcTokenTTL <= 0 {
@@ -114,6 +114,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	r.Get("/api/feed/list", auth, feedHandler.ListFeed)
 	r.Get("/api/feed/my_posts", auth, feedHandler.ListMyPosts)
 	r.Post("/api/feed/like", auth, feedHandler.ToggleLike)
+	r.Get("/api/feed/is_liked", auth, feedHandler.IsLiked)
 	r.Post("/api/feed/comment", auth, feedHandler.CreateComment)
 	r.Delete("/api/feed/comment", auth, feedHandler.DeleteComment)
 	r.Get("/api/feed/comments", auth, feedHandler.ListComments)

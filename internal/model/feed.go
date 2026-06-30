@@ -1,5 +1,6 @@
 package model
 
+import "time"
 
 // MediaType 媒体类型
 type MediaType int
@@ -41,11 +42,12 @@ func (FeedMedia) TableName() string {
 	return "feed_media"
 }
 
-// FeedLike 动态点赞
+// FeedLike 动态点赞（不使用软删除，避免取消点赞后重新点赞时唯一索引冲突）
 type FeedLike struct {
-	BaseModel
-	PostID uint `json:"post_id" gorm:"uniqueIndex:idx_post_user;not null"`
-	UserID uint `json:"user_id" gorm:"uniqueIndex:idx_post_user;not null"`
+	ID        uint      `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time `json:"created_at"`
+	PostID    uint      `json:"post_id" gorm:"uniqueIndex:idx_post_user;not null"`
+	UserID    uint      `json:"user_id" gorm:"uniqueIndex:idx_post_user;not null"`
 	// 关联
 	User User `json:"user" gorm:"foreignKey:UserID"`
 }

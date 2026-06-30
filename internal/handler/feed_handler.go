@@ -94,6 +94,11 @@ func (h *FeedHandler) DeletePost(c *fiber.Ctx) error {
 
 // ===================== 动态详情 ====================
 func (h *FeedHandler) GetDetail(c *fiber.Ctx) error {
+	userID, err := GetUserID(c)
+	if err != nil {
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
+	}
+
 	postIDStr := c.Query("post_id")
 	if postIDStr == "" {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
@@ -103,7 +108,7 @@ func (h *FeedHandler) GetDetail(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 
-	post, err := h.feedService.GetPostDetail(c.Context(), uint(postID))
+	result, err := h.feedService.GetPostDetail(c.Context(), userID, uint(postID))
 	if err != nil {
 		if errors.Is(err, service.ErrPostNotFound) {
 			return response.Result(c, http.StatusNotFound, errcode.NotFound, nil)
@@ -111,7 +116,10 @@ func (h *FeedHandler) GetDetail(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 
-	return response.Success(c, post, "获取动态详情成功")
+	return response.Success(c, fiber.Map{
+		"post":     result.Post,
+		"is_liked": result.IsLiked,
+	}, "获取动态详情成功")
 }
 
 // ===================== 动态列表（朋友圈） ====================
@@ -124,13 +132,23 @@ func (h *FeedHandler) ListFeed(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
 
-	posts, total, err := h.feedService.ListFeed(c.Context(), userID, page, pageSize)
+	postsWithLiked, total, err := h.feedService.ListFeed(c.Context(), userID, page, pageSize)
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 
+	// 构建带 is_liked 的列表
+	type postItem struct {
+		*model.FeedPost
+		IsLiked bool `json:"is_liked"`
+	}
+	items := make([]postItem, len(postsWithLiked))
+	for i, p := range postsWithLiked {
+		items[i] = postItem{FeedPost: p.Post, IsLiked: p.IsLiked}
+	}
+
 	return response.Success(c, fiber.Map{
-		"list":      posts,
+		"list":      items,
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
@@ -147,13 +165,23 @@ func (h *FeedHandler) ListMyPosts(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
 
-	posts, total, err := h.feedService.ListMyPosts(c.Context(), userID, page, pageSize)
+	postsWithLiked, total, err := h.feedService.ListMyPosts(c.Context(), userID, page, pageSize)
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 
+	// 构建带 is_liked 的列表
+	type postItem struct {
+		*model.FeedPost
+		IsLiked bool `json:"is_liked"`
+	}
+	items := make([]postItem, len(postsWithLiked))
+	for i, p := range postsWithLiked {
+		items[i] = postItem{FeedPost: p.Post, IsLiked: p.IsLiked}
+	}
+
 	return response.Success(c, fiber.Map{
-		"list":      posts,
+		"list":      items,
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
@@ -265,4 +293,30 @@ func (h *FeedHandler) ListComments(c *fiber.Ctx) error {
 		"page":      page,
 		"page_size": pageSize,
 	}, "获取评论列表成功")
+}
+
+// ===================== 查询点赞状态 ====================
+func (h *FeedHandler) IsLiked(c *fiber.Ctx) error {
+	userID, err := GetUserID(c)
+	if err != nil {
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
+	}
+
+	postIDStr := c.Query("post_id")
+	if postIDStr == "" {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
+	}
+	postID, err := strconv.ParseUint(postIDStr, 10, 64)
+	if err != nil {
+		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
+	}
+
+	liked, err := h.feedService.IsLiked(c.Context(), userID, uint(postID))
+	if err != nil {
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
+	}
+
+	return response.Success(c, fiber.Map{
+		"is_liked": liked,
+	}, "查询成功")
 }
