@@ -55,6 +55,10 @@ func (m *JWTMiddleware) Auth() fiber.Handler {
 		if claims == nil {
 			return nil
 		}
+		if !redisPkg.IsSessionValid(uint(claims.UserID), claims.SessionID) {
+			_ = response.Error(c, fiber.StatusUnauthorized, "账号在其他设备登录，请重新登录")
+			return nil
+		}
 		c.Locals("user_id", uint(claims.UserID))
 		c.Locals("account", claims.Account)
 		c.Locals("session_id", claims.SessionID)

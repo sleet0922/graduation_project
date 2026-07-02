@@ -50,7 +50,7 @@ type FeedService interface {
 	// 评论
 	CreateComment(ctx context.Context, userID, postID uint, content string, replyToID *uint) (*model.FeedComment, error)
 	DeleteComment(ctx context.Context, userID, commentID uint) error
-	ListComments(ctx context.Context, postID uint, page, pageSize int) ([]model.FeedComment, int64, error)
+	ListComments(ctx context.Context, userID, postID uint, page, pageSize int) ([]model.FeedComment, int64, error)
 }
 
 type feedService struct {
@@ -110,6 +110,13 @@ func (s *feedService) DeletePost(ctx context.Context, userID, postID uint) error
 }
 
 func (s *feedService) GetPostDetail(ctx context.Context, userID, postID uint) (*FeedPostWithLiked, error) {
+	canView, err := s.feedRepo.CanViewPost(ctx, userID, postID)
+	if err != nil {
+		return nil, err
+	}
+	if !canView {
+		return nil, ErrPostNotFound
+	}
 	post, err := s.feedRepo.GetPostByID(ctx, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -264,7 +271,14 @@ func (s *feedService) IsLiked(ctx context.Context, userID, postID uint) (bool, e
 
 func (s *feedService) CreateComment(ctx context.Context, userID, postID uint, content string, replyToID *uint) (*model.FeedComment, error) {
 	// 检查帖子是否存在
-	_, err := s.feedRepo.GetPostByID(ctx, postID)
+	canView, err := s.feedRepo.CanViewPost(ctx, userID, postID)
+	if err != nil {
+		return nil, err
+	}
+	if !canView {
+		return nil, ErrPostNotFound
+	}
+	_, err = s.feedRepo.GetPostByID(ctx, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPostNotFound
@@ -290,13 +304,17 @@ func (s *feedService) CreateComment(ctx context.Context, userID, postID uint, co
 }
 
 func (s *feedService) DeleteComment(ctx context.Context, userID, commentID uint) error {
-	if err := s.feedRepo.DeleteComment(ctx, commentID, userID); err != nil {
+	postID, deleted, err := s.feedRepo.DeleteComment(ctx, commentID, userID)
+	if err != nil {
 		return err
+	}
+	if deleted {
+		_ = s.feedRepo.DecrementCommentCount(ctx, postID)
 	}
 	return nil
 }
 
-func (s *feedService) ListComments(ctx context.Context, postID uint, page, pageSize int) ([]model.FeedComment, int64, error) {
+func (s *feedService) ListComments(ctx context.Context, userID, postID uint, page, pageSize int) ([]model.FeedComment, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -304,5 +322,12 @@ func (s *feedService) ListComments(ctx context.Context, postID uint, page, pageS
 		pageSize = 20
 	}
 	offset := (page - 1) * pageSize
+	canView, err := s.feedRepo.CanViewPost(ctx, userID, postID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !canView {
+		return nil, 0, ErrPostNotFound
+	}
 	return s.feedRepo.ListComments(ctx, postID, offset, pageSize)
 }

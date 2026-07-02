@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
+	"strings"
 )
 
 var (
@@ -60,7 +61,15 @@ func (s *friendService) SendFriendRequest(ctx context.Context, senderID, receive
 }
 
 func (s *friendService) SendFriendRequestByAccount(ctx context.Context, senderID uint, account string) (uint, error) {
-	user, err := s.userRepo.GetByAccount(ctx, account)
+	var (
+		user *model.User
+		err  error
+	)
+	if strings.Contains(account, "@") {
+		user, err = s.userRepo.GetByEmail(ctx, account)
+	} else {
+		user, err = s.userRepo.GetByAccount(ctx, account)
+	}
 	if err != nil {
 		return 0, ErrUserNotFound
 	}

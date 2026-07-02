@@ -14,6 +14,7 @@ type FeedRepository interface {
 	CreatePost(ctx context.Context, post *model.FeedPost) error
 	DeletePost(ctx context.Context, postID uint, userID uint) error
 	GetPostByID(ctx context.Context, postID uint) (*model.FeedPost, error)
+	CanViewPost(ctx context.Context, userID uint, postID uint) (bool, error)
 	ListPosts(ctx context.Context, userID uint, offset, limit int) ([]model.FeedPost, int64, error)
 	ListMyPosts(ctx context.Context, userID uint, offset, limit int) ([]model.FeedPost, int64, error)
 
@@ -23,7 +24,7 @@ type FeedRepository interface {
 	DeleteMediaByPostID(ctx context.Context, postID uint) error
 
 	// 点赞
-	CreateLike(ctx context.Context, like *model.FeedLike) (int64, error)  // 返回受影响行数
+	CreateLike(ctx context.Context, like *model.FeedLike) (int64, error)     // 返回受影响行数
 	DeleteLike(ctx context.Context, postID uint, userID uint) (int64, error) // 返回受影响行数
 	IsLiked(ctx context.Context, postID uint, userID uint) (bool, error)
 	IncrementLikeCount(ctx context.Context, postID uint) error
@@ -32,7 +33,7 @@ type FeedRepository interface {
 
 	// 评论
 	CreateComment(ctx context.Context, comment *model.FeedComment) error
-	DeleteComment(ctx context.Context, commentID uint, userID uint) error
+	DeleteComment(ctx context.Context, commentID uint, userID uint) (uint, bool, error)
 	ListComments(ctx context.Context, postID uint, offset, limit int) ([]model.FeedComment, int64, error)
 	IncrementCommentCount(ctx context.Context, postID uint) error
 	DecrementCommentCount(ctx context.Context, postID uint) error
@@ -76,6 +77,20 @@ func (r *feedRepository) GetPostByID(ctx context.Context, postID uint) (*model.F
 		return nil, err
 	}
 	return &post, nil
+}
+
+func (r *feedRepository) CanViewPost(ctx context.Context, userID uint, postID uint) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.FeedPost{}).
+		Where("id = ? AND deleted_at IS NULL", postID).
+		Where("user_id = ? OR user_id IN (?)",
+			userID,
+			r.db.Model(&model.Friend{}).
+				Select("friend_id").
+				Where("user_id = ? AND deleted_at IS NULL", userID),
+		).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *feedRepository) ListPosts(ctx context.Context, userID uint, offset, limit int) ([]model.FeedPost, int64, error) {
@@ -229,10 +244,18 @@ func (r *feedRepository) CreateComment(ctx context.Context, comment *model.FeedC
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
-func (r *feedRepository) DeleteComment(ctx context.Context, commentID uint, userID uint) error {
-	return r.db.WithContext(ctx).
-		Where("id = ? AND user_id = ?", commentID, userID).
-		Delete(&model.FeedComment{}).Error
+func (r *feedRepository) DeleteComment(ctx context.Context, commentID uint, userID uint) (uint, bool, error) {
+	var comment model.FeedComment
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND user_id = ? AND deleted_at IS NULL", commentID, userID).
+		First(&comment).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	result := r.db.WithContext(ctx).Delete(&comment)
+	return comment.PostID, result.RowsAffected > 0, result.Error
 }
 
 func (r *feedRepository) ListComments(ctx context.Context, postID uint, offset, limit int) ([]model.FeedComment, int64, error) {

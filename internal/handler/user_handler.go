@@ -136,21 +136,30 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 	sessionID := generateSessionID()
-	_, err = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
+	refreshID, err := jwt.GenerateTokenID()
 	if err != nil {
-		slog.Warn("SetUserSession failed", slog.Any("user_id", user.ID), slog.Any("error", err))
-	}
-	if h.chatService != nil {
-		h.chatService.KickUserConnections(user.ID, "账号在其他设备登录")
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
 
 	accessToken, err := h.jwtManager.GenerateTokenWithSession(user.ID, user.Account, jwt.TokenTypeAccess, sessionID, h.accessTokenExpiresIn)
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
-	refreshToken, err := h.jwtManager.GenerateTokenWithSession(user.ID, user.Account, jwt.TokenTypeRefresh, sessionID, h.refreshTokenExpiresIn)
+	refreshToken, err := h.jwtManager.GenerateTokenWithSessionAndRefreshID(user.ID, user.Account, jwt.TokenTypeRefresh, sessionID, refreshID, h.refreshTokenExpiresIn)
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
+	}
+	_, err = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
+	if err != nil {
+		slog.Error("SetUserSession failed", slog.Any("user_id", user.ID), slog.Any("error", err))
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
+	}
+	if err := redisPkg.SetRefreshTokenID(user.ID, sessionID, refreshID, h.refreshTokenExpiresIn); err != nil {
+		slog.Error("SetRefreshTokenID failed", slog.Any("user_id", user.ID), slog.Any("error", err))
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
+	}
+	if h.chatService != nil {
+		h.chatService.KickUserConnections(user.ID, "账号在其他设备登录")
 	}
 
 	return response.Success(c, fiber.Map{
@@ -235,14 +244,37 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 
-	accessToken, err := h.jwtManager.RefreshAccessToken(req.RefreshToken, h.accessTokenExpiresIn)
+	claims, err := h.jwtManager.ParseToken(req.RefreshToken)
 	if err != nil {
 		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 	}
-
-	refreshToken, err := h.jwtManager.RotateRefreshToken(req.RefreshToken, h.refreshTokenExpiresIn)
-	if err != nil {
+	if claims.TokenType != jwt.TokenTypeRefresh || claims.SessionID == "" || claims.RefreshID == "" {
 		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
+	}
+	if !redisPkg.IsSessionValid(claims.UserID, claims.SessionID) {
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
+	}
+
+	newRefreshID, err := jwt.GenerateTokenID()
+	if err != nil {
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
+	}
+	if err := redisPkg.RotateRefreshTokenID(claims.UserID, claims.SessionID, claims.RefreshID, newRefreshID, h.refreshTokenExpiresIn); err != nil {
+		slog.Warn("RotateRefreshTokenID failed", slog.Any("user_id", claims.UserID), slog.Any("error", err))
+		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
+	}
+	if err := redisPkg.ExpireUserSession(claims.UserID, h.refreshTokenExpiresIn); err != nil {
+		slog.Error("ExpireUserSession failed", slog.Any("user_id", claims.UserID), slog.Any("error", err))
+		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
+	}
+
+	accessToken, err := h.jwtManager.GenerateTokenWithSession(claims.UserID, claims.Account, jwt.TokenTypeAccess, claims.SessionID, h.accessTokenExpiresIn)
+	if err != nil {
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
+	}
+	refreshToken, err := h.jwtManager.GenerateTokenWithSessionAndRefreshID(claims.UserID, claims.Account, jwt.TokenTypeRefresh, claims.SessionID, newRefreshID, h.refreshTokenExpiresIn)
+	if err != nil {
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
 
 	return response.Success(c, fiber.Map{

@@ -7,12 +7,13 @@ import (
 )
 
 type DatabaseConfig struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Dbname   string `json:"dbname"`
-	Charset  string `json:"charset"`
+	Username    string `json:"username" mapstructure:"username"`
+	Password    string `json:"password" mapstructure:"password"`
+	Host        string `json:"host" mapstructure:"host"`
+	Port        int    `json:"port" mapstructure:"port"`
+	Dbname      string `json:"dbname" mapstructure:"dbname"`
+	Charset     string `json:"charset" mapstructure:"charset"`
+	AutoMigrate bool   `json:"auto_migrate" mapstructure:"auto_migrate"`
 }
 
 type ServerConfig struct {
@@ -48,7 +49,7 @@ type LogConfig struct {
 
 type ViperConfig struct {
 	Server   ServerConfig   `json:"server"`
-	Database DatabaseConfig `json:"database"`
+	Database DatabaseConfig `json:"database" mapstructure:"database"`
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
 	RTC      RTCConfig      `json:"rtc" mapstructure:"rtc"`

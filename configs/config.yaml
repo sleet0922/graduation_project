@@ -9,6 +9,7 @@ database:
   port: 5432
   dbname: "graduation_project"
   charset: "utf8mb4"
+  auto_migrate: false
 
 oss:
   access_key_id: "0CsZkaRGG_4IifjzH4NOcMN4jGbngAoNoZBK7rsQ"

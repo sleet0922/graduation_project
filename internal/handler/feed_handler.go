@@ -270,6 +270,11 @@ func (h *FeedHandler) DeleteComment(c *fiber.Ctx) error {
 
 // ===================== 评论列表 ====================
 func (h *FeedHandler) ListComments(c *fiber.Ctx) error {
+	userID, err := GetUserID(c)
+	if err != nil {
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
+	}
+
 	postIDStr := c.Query("post_id")
 	if postIDStr == "" {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
@@ -282,8 +287,11 @@ func (h *FeedHandler) ListComments(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
 
-	comments, total, err := h.feedService.ListComments(c.Context(), uint(postID), page, pageSize)
+	comments, total, err := h.feedService.ListComments(c.Context(), userID, uint(postID), page, pageSize)
 	if err != nil {
+		if errors.Is(err, service.ErrPostNotFound) {
+			return response.Result(c, http.StatusNotFound, errcode.NotFound, nil)
+		}
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/oss"
@@ -18,8 +20,31 @@ type OssHandler struct {
 	kodoClient *oss.QiniuKodo
 }
 
+var safeObjectKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,180}$`)
+
 func NewOssHandler(kodoClient *oss.QiniuKodo) *OssHandler {
 	return &OssHandler{kodoClient: kodoClient}
+}
+
+func safeUploadObjectKey(fileType, objectKey string) (string, error) {
+	decoded, err := url.QueryUnescape(objectKey)
+	if err != nil {
+		return "", fmt.Errorf("非法key参数")
+	}
+	if !safeObjectKeyPattern.MatchString(decoded) || strings.Contains(decoded, "..") {
+		return "", fmt.Errorf("非法key参数")
+	}
+
+	switch fileType {
+	case "avatar":
+		return "avatar/" + decoded, nil
+	case "chat", "video":
+		return "chat/" + decoded, nil
+	case "feed":
+		return "feed/" + decoded, nil
+	default:
+		return "", fmt.Errorf("不支持的文件类型")
+	}
 }
 
 // GetUploadURL 获取文件上传URL
@@ -32,14 +57,9 @@ func (h *OssHandler) GetUploadURL(c *fiber.Ctx) error {
 	if fileType == "" {
 		fileType = "chat"
 	}
-	var fullObjectKey string
-	switch fileType {
-	case "avatar":
-		fullObjectKey = "avatar/" + objectKey
-	case "chat", "video":
-		fullObjectKey = "chat/" + objectKey
-	default:
-		fullObjectKey = objectKey
+	fullObjectKey, err := safeUploadObjectKey(fileType, objectKey)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	presignedURL, err := h.kodoClient.GetPresignedUploadURL(c.Context(), fullObjectKey, time.Hour)
 	if err != nil {
@@ -68,6 +88,8 @@ func (h *OssHandler) GetDownloadURL(c *fiber.Ctx) error {
 		fullObjectKey = "avatar/" + objectKey
 	} else if strings.HasPrefix(objectKey, "chat_") {
 		fullObjectKey = "chat/" + objectKey
+	} else if strings.HasPrefix(objectKey, "feed_") {
+		fullObjectKey = "feed/" + objectKey
 	} else {
 		fullObjectKey = objectKey
 	}

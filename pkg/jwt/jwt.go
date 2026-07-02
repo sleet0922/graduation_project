@@ -1,6 +1,8 @@
 package jwt
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -18,6 +20,7 @@ type Claims struct {
 	Account              string `json:"account"` // 用户账号
 	TokenType            string `json:"token_type"`
 	SessionID            string `json:"session_id"` // 会话ID，用于多设备踢下线
+	RefreshID            string `json:"refresh_id,omitempty"`
 	jwt.RegisteredClaims        // JWT标准声明（过期时间、签发时间等）
 }
 
@@ -42,6 +45,14 @@ func NewJWTManager(secretKey string) *JWTManager {
 	}
 }
 
+func GenerateTokenID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // ParseToken 解析并验证 JWT token
 func (j *JWTManager) ParseToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
@@ -62,11 +73,18 @@ func (j *JWTManager) ParseToken(tokenString string) (*Claims, error) {
 // ----------JWT 生成token（底层）----------
 // GenerateTokenWithSession 生成带 session_id 的 token，sessionID 为空时兼容旧版
 func (j *JWTManager) GenerateTokenWithSession(userID uint, account, tokenType, sessionID string, expiresIn time.Duration) (string, error) {
+	return j.GenerateTokenWithSessionAndRefreshID(userID, account, tokenType, sessionID, "", expiresIn)
+}
+
+// GenerateTokenWithSessionAndRefreshID 生成带 session_id 和 refresh_id 的 token。
+// refresh_id 只用于 refresh token 的服务端轮换校验。
+func (j *JWTManager) GenerateTokenWithSessionAndRefreshID(userID uint, account, tokenType, sessionID, refreshID string, expiresIn time.Duration) (string, error) {
 	claims := Claims{
 		UserID:    userID,
 		Account:   account,
 		TokenType: tokenType,
 		SessionID: sessionID,
+		RefreshID: refreshID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)), // 过期时间
 			IssuedAt:  jwt.NewNumericDate(time.Now()),                // 签发时间
