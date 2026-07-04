@@ -35,7 +35,7 @@ type SystemPushResult struct {
 }
 
 type ChatService interface {
-	RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string
+	RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func(), opts ...RegisterConnectionOption) string
 	UnregisterConnection(userID uint, connectionID string)
 	SendMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error)
 	BroadcastGroupDissolved(ctx context.Context, groupID uint, userIDs []uint)
@@ -54,6 +54,25 @@ type chatConnection struct {
 type queuedSystemEvent struct {
 	id      string
 	payload any
+}
+
+type registerConnectionOptions struct {
+	DrainOfflineMessages bool
+	Client               string
+}
+
+type RegisterConnectionOption func(*registerConnectionOptions)
+
+func WithOfflineDrain(enabled bool) RegisterConnectionOption {
+	return func(opts *registerConnectionOptions) {
+		opts.DrainOfflineMessages = enabled
+	}
+}
+
+func WithConnectionClient(client string) RegisterConnectionOption {
+	return func(opts *registerConnectionOptions) {
+		opts.Client = client
+	}
 }
 
 type chatService struct {
@@ -240,7 +259,17 @@ func (s *chatService) sendGroupMessage(ctx context.Context, fromUserID, groupID 
 
 // ----------公共方法----------
 // 发送好友消息
-func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func()) string {
+func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func(), opts ...RegisterConnectionOption) string {
+	options := registerConnectionOptions{
+		DrainOfflineMessages: true,
+		Client:               "foreground",
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
 	connectionID := fmt.Sprintf("%d", atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
 	if s.connections[userID] == nil {
@@ -256,9 +285,9 @@ func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliv
 	pendingSystem := append([]*queuedSystemEvent(nil), s.systemOffline[userID]...)
 	connectionIDs := connectionIDsFromMap(s.connections[userID])
 	s.mu.Unlock()
-	logger.Info("websocket connection registered", "user_id", userID, "connection_ids", connectionIDs, "connection_count", len(connectionIDs))
+	logger.Info("websocket connection registered", "user_id", userID, "connection_ids", connectionIDs, "connection_count", len(connectionIDs), "client", options.Client, "drain_offline", options.DrainOfflineMessages)
 	delivered := make(map[string]struct{}, len(pending))
-	if len(pending) > 0 {
+	if options.DrainOfflineMessages && len(pending) > 0 {
 		for _, message := range pending {
 			if err := deliver(message, true); err == nil {
 				delivered[message.ID] = struct{}{}
@@ -311,7 +340,9 @@ func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliv
 			s.mu.Unlock()
 		}
 	}
-	s.drainRedisMessages(ctx, userID, delivered, deliver)
+	if options.DrainOfflineMessages {
+		s.drainRedisMessages(ctx, userID, delivered, deliver)
+	}
 
 	return connectionID
 }

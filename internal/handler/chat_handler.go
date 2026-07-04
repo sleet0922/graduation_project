@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
@@ -41,6 +42,8 @@ func NewChatHandler(chatService service.ChatService) *ChatHandler {
 func (h *ChatHandler) Connect() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
 		userID := c.Locals("user_id").(uint)
+		client := strings.ToLower(c.Query("client", "foreground"))
+		drainOffline := client != "background"
 
 		ctx := context.Background()
 		if err := c.WriteJSON(chatOutgoingMessage{
@@ -62,8 +65,8 @@ func (h *ChatHandler) Connect() fiber.Handler {
 			return c.WriteJSON(payload)
 		}, func() {
 			c.Close()
-		})
-		logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
+		}, service.WithOfflineDrain(drainOffline), service.WithConnectionClient(client))
+		logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID), slog.String("client", client), slog.Bool("drain_offline", drainOffline))
 
 		defer func() {
 			h.chatService.UnregisterConnection(userID, connectionID)
