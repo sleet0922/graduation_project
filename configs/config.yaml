@@ -5,7 +5,7 @@ server:
 database:
   username: "sleet"
   password: "Zyz20050922!"
-  host: "192.168.3.114"
+  host: "192.168.3.111"
   port: 5432
   dbname: "graduation_project"
   charset: "utf8mb4"
@@ -38,7 +38,7 @@ log:
   compress: true
 
 redis:
-  addr: "192.168.3.114"
+  addr: "192.168.3.111"
   port: 6379
   password: ""
   db: 0
