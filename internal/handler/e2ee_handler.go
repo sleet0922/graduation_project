@@ -32,6 +32,11 @@ type publishGroupKeyBoxPayload struct {
 	WrapNonce       string `json:"wrap_nonce"`
 }
 
+type rotateGroupKeyRequest struct {
+	GroupID            uint `json:"group_id"`
+	ExpectedKeyVersion int  `json:"expected_key_version"`
+}
+
 func NewE2EEHandler(e2eeService service.E2EEService) *E2EEHandler {
 	return &E2EEHandler{e2eeService: e2eeService}
 }
@@ -65,6 +70,8 @@ func (h *E2EEHandler) handleGroupKeyError(c *fiber.Ctx, err error) error {
 		return response.Error(c, http.StatusNotFound, "e2ee group key box not found")
 	case errors.Is(err, service.ErrE2EEGroupVersionLock):
 		return response.Error(c, http.StatusConflict, "e2ee group key version conflict")
+	case errors.Is(err, service.ErrE2EEGroupBoxesPublished):
+		return response.Error(c, http.StatusConflict, "e2ee group key boxes already published")
 	case errors.Is(err, service.ErrE2EEGroupBoxesInvalid):
 		return response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
 	default:
@@ -241,6 +248,8 @@ func (h *E2EEHandler) PublishGroupKeyBoxes(c *fiber.Ctx) error {
 			return response.Error(c, http.StatusNotFound, "e2ee group key version not found")
 		case errors.Is(err, service.ErrE2EEGroupVersionLock):
 			return response.Error(c, http.StatusConflict, "e2ee group key version conflict")
+		case errors.Is(err, service.ErrE2EEGroupBoxesPublished):
+			return response.Error(c, http.StatusConflict, "e2ee group key boxes already published")
 		case errors.Is(err, service.ErrE2EEGroupBoxesInvalid):
 			return response.Error(c, http.StatusBadRequest, "invalid e2ee group key boxes payload")
 		default:
@@ -251,6 +260,25 @@ func (h *E2EEHandler) PublishGroupKeyBoxes(c *fiber.Ctx) error {
 		"group_id":    req.GroupID,
 		"key_version": req.KeyVersion,
 		"box_count":   len(req.Boxes),
+	}, "ok")
+}
+
+func (h *E2EEHandler) RotateGroupKey(c *fiber.Ctx) error {
+	currentUserID, err := GetUserID(c)
+	if err != nil {
+		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
+	}
+	var req rotateGroupKeyRequest
+	if err := c.BodyParser(&req); err != nil || req.GroupID == 0 || req.ExpectedKeyVersion <= 0 {
+		return response.Error(c, http.StatusBadRequest, "参数错误")
+	}
+	keyVersion, err := h.e2eeService.RotateGroupKeyIfCurrent(c.Context(), currentUserID, req.GroupID, req.ExpectedKeyVersion)
+	if err != nil {
+		return h.handleGroupKeyError(c, err)
+	}
+	return response.Success(c, fiber.Map{
+		"group_id":    req.GroupID,
+		"key_version": keyVersion,
 	}, "ok")
 }
 

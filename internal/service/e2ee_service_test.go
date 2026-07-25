@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"sleet0922/graduation_project/internal/model"
+	"sleet0922/graduation_project/internal/repo"
 )
 
 type fakeE2EEKeyRepo struct {
@@ -119,6 +120,18 @@ func (r *fakeE2EEGroupKeyRepo) CreateNextVersion(ctx context.Context, groupID, c
 	return &model.E2EEGroupKey{GroupID: groupID, KeyVersion: r.versions[groupID], CreatedBy: createdBy}, nil
 }
 
+func (r *fakeE2EEGroupKeyRepo) CreateNextVersionIfCurrent(ctx context.Context, groupID uint, expectedVersion int, createdBy uint) (*model.E2EEGroupKey, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.versions[groupID] == expectedVersion {
+		r.versions[groupID]++
+	}
+	return &model.E2EEGroupKey{GroupID: groupID, KeyVersion: r.versions[groupID], CreatedBy: createdBy}, nil
+}
+
 func (r *fakeE2EEGroupKeyRepo) GetVersionBoxes(ctx context.Context, groupID uint, keyVersion int) ([]*model.E2EEGroupKeyBox, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -140,6 +153,11 @@ func (r *fakeE2EEGroupKeyRepo) ReplaceVersionBoxes(ctx context.Context, groupID 
 	defer r.mu.Unlock()
 	if r.err != nil {
 		return r.err
+	}
+	for key := range r.boxes {
+		if key[0] == groupID && key[1] == uint(keyVersion) {
+			return repo.ErrE2EEGroupKeyBoxesExist
+		}
 	}
 	for _, box := range boxes {
 		copied := *box
@@ -170,6 +188,31 @@ func TestE2EEServicePublishUserPublicKey(t *testing.T) {
 	}
 }
 
+func TestE2EEServiceIdentityKeyChangeRotatesUserGroups(t *testing.T) {
+	ctx := context.Background()
+	keyRepo := newFakeE2EEKeyRepo()
+	groupRepo := newFakeGroupRepo()
+	groupRepo.groups[10] = &model.ChatGroup{ID: 10, OwnerID: 1}
+	groupRepo.members[10] = map[uint]*model.ChatGroupMember{1: {GroupID: 10, UserID: 1}}
+	groupKeyRepo := newFakeE2EEGroupKeyRepo()
+	groupKeyRepo.versions[10] = 1
+	svc := NewE2EEService(keyRepo, groupRepo, groupKeyRepo, newFakeFriendRepo(), nil)
+	firstKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	secondKeyBytes := make([]byte, 32)
+	secondKeyBytes[0] = 1
+	secondKey := base64.StdEncoding.EncodeToString(secondKeyBytes)
+
+	if _, err := svc.PublishUserPublicKey(ctx, 1, "x25519", firstKey); err != nil {
+		t.Fatalf("first key publish failed: %v", err)
+	}
+	if _, err := svc.PublishUserPublicKey(ctx, 1, "x25519", secondKey); err != nil {
+		t.Fatalf("replacement key publish failed: %v", err)
+	}
+	if version, _ := groupKeyRepo.GetCurrentVersion(ctx, 10); version != 2 {
+		t.Fatalf("current group key version = %d, want 2 after identity key change", version)
+	}
+}
+
 func TestE2EEServiceGroupKeyBoxes(t *testing.T) {
 	ctx := context.Background()
 	groupRepo := newFakeGroupRepo()
@@ -194,8 +237,15 @@ func TestE2EEServiceGroupKeyBoxes(t *testing.T) {
 	if err := svc.PublishGroupKeyBoxes(ctx, 1, 10, 1, []GroupKeyBoxUpload{{UserID: 2, WrappedGroupKey: "bad", WrapNonce: validNonce}}, ""); !errors.Is(err, ErrE2EEGroupBoxesInvalid) {
 		t.Fatalf("bad wrapped key error = %v, want ErrE2EEGroupBoxesInvalid", err)
 	}
-	if err := svc.PublishGroupKeyBoxes(ctx, 1, 10, 1, []GroupKeyBoxUpload{{UserID: 2, WrappedGroupKey: validWrapped, WrapNonce: validNonce}}, ""); err != nil {
+	validBoxes := []GroupKeyBoxUpload{
+		{UserID: 1, WrappedGroupKey: validWrapped, WrapNonce: validNonce},
+		{UserID: 2, WrappedGroupKey: validWrapped, WrapNonce: validNonce},
+	}
+	if err := svc.PublishGroupKeyBoxes(ctx, 1, 10, 1, validBoxes, ""); err != nil {
 		t.Fatalf("PublishGroupKeyBoxes failed: %v", err)
+	}
+	if err := svc.PublishGroupKeyBoxes(ctx, 2, 10, 1, validBoxes, ""); !errors.Is(err, ErrE2EEGroupBoxesPublished) {
+		t.Fatalf("second publisher error = %v, want ErrE2EEGroupBoxesPublished", err)
 	}
 
 	box, err := svc.GetGroupKeyBoxByVersion(ctx, 2, 10, 1)
@@ -204,6 +254,25 @@ func TestE2EEServiceGroupKeyBoxes(t *testing.T) {
 	}
 	if box.UserID != 2 || box.KeyWrapAlg != "chacha20poly1305-v1" {
 		t.Fatalf("box = %#v, want user 2 with default algorithm", box)
+	}
+}
+
+func TestE2EEServiceRotateGroupKeyIfCurrentIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	groupRepo := newFakeGroupRepo()
+	groupRepo.groups[10] = &model.ChatGroup{ID: 10, OwnerID: 1}
+	groupRepo.members[10] = map[uint]*model.ChatGroupMember{1: {GroupID: 10, UserID: 1}}
+	groupKeyRepo := newFakeE2EEGroupKeyRepo()
+	groupKeyRepo.versions[10] = 1
+	svc := NewE2EEService(newFakeE2EEKeyRepo(), groupRepo, groupKeyRepo, newFakeFriendRepo(), nil)
+
+	version, err := svc.RotateGroupKeyIfCurrent(ctx, 1, 10, 1)
+	if err != nil || version != 2 {
+		t.Fatalf("first recovery rotation = version %d error %v, want version 2", version, err)
+	}
+	version, err = svc.RotateGroupKeyIfCurrent(ctx, 1, 10, 1)
+	if err != nil || version != 2 {
+		t.Fatalf("repeated recovery rotation = version %d error %v, want version 2", version, err)
 	}
 }
 

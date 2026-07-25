@@ -14,15 +14,16 @@ import (
 )
 
 var (
-	ErrUnsupportedE2EEKeyType = errors.New("key_type 仅支持 x25519")
-	ErrInvalidE2EEPublicKey   = errors.New("public_key 必须是 base64 编码且解码后长度为 32 字节")
-	ErrE2EEPublicKeyNotFound  = errors.New("e2ee public key not found")
-	ErrE2EEGroupPermission    = errors.New("forbidden: not group member")
-	ErrE2EEGroupKeyNotFound   = errors.New("e2ee group key not found")
-	ErrE2EEGroupVersionAbsent = errors.New("e2ee group key version not found")
-	ErrE2EEGroupKeyBoxMissing = errors.New("e2ee group key box not found for current user")
-	ErrE2EEGroupBoxesInvalid  = errors.New("invalid e2ee group key boxes payload")
-	ErrE2EEGroupVersionLock   = errors.New("cannot publish boxes for historical version")
+	ErrUnsupportedE2EEKeyType  = errors.New("key_type 仅支持 x25519")
+	ErrInvalidE2EEPublicKey    = errors.New("public_key 必须是 base64 编码且解码后长度为 32 字节")
+	ErrE2EEPublicKeyNotFound   = errors.New("e2ee public key not found")
+	ErrE2EEGroupPermission     = errors.New("forbidden: not group member")
+	ErrE2EEGroupKeyNotFound    = errors.New("e2ee group key not found")
+	ErrE2EEGroupVersionAbsent  = errors.New("e2ee group key version not found")
+	ErrE2EEGroupKeyBoxMissing  = errors.New("e2ee group key box not found for current user")
+	ErrE2EEGroupBoxesInvalid   = errors.New("invalid e2ee group key boxes payload")
+	ErrE2EEGroupVersionLock    = errors.New("cannot publish boxes for historical version")
+	ErrE2EEGroupBoxesPublished = errors.New("e2ee group key boxes already published")
 )
 
 const (
@@ -42,6 +43,7 @@ type E2EEService interface {
 	GetGroupKeyBoxByVersion(ctx context.Context, currentUserID, groupID uint, keyVersion int) (*model.E2EEGroupKeyBox, error)
 	GetGroupCurrentVersion(ctx context.Context, groupID uint) (int, error)
 	RotateGroupKey(ctx context.Context, groupID, currentUserID uint) error
+	RotateGroupKeyIfCurrent(ctx context.Context, currentUserID, groupID uint, expectedVersion int) (int, error)
 	PublishGroupKeyBoxes(ctx context.Context, currentUserID, groupID uint, keyVersion int, boxes []GroupKeyBoxUpload, keyWrapAlg string) error
 }
 
@@ -126,6 +128,16 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 	}
 
 	if oldPublicKey != "" && oldPublicKey != normalizedPublicKey {
+		groups, err := s.groupRepo.GetGroupsByUserID(ctx, userID)
+		if err != nil {
+			logger.Error("failed to get groups after e2ee identity key change", "user_id", userID, "error", err)
+		} else {
+			for _, group := range groups {
+				if _, err := s.groupKeyRepo.CreateNextVersion(ctx, group.ID, userID); err != nil {
+					logger.Error("failed to rotate group key after e2ee identity key change", "user_id", userID, "group_id", group.ID, "error", err)
+				}
+			}
+		}
 		go s.notifyFriendsKeyChanged(userID)
 	}
 
@@ -242,6 +254,20 @@ func (s *e2eeService) RotateGroupKey(ctx context.Context, groupID, currentUserID
 	return err
 }
 
+func (s *e2eeService) RotateGroupKeyIfCurrent(ctx context.Context, currentUserID, groupID uint, expectedVersion int) (int, error) {
+	if expectedVersion <= 0 {
+		return 0, ErrE2EEGroupBoxesInvalid
+	}
+	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
+		return 0, ErrE2EEGroupPermission
+	}
+	key, err := s.groupKeyRepo.CreateNextVersionIfCurrent(ctx, groupID, expectedVersion, currentUserID)
+	if err != nil {
+		return 0, err
+	}
+	return key.KeyVersion, nil
+}
+
 // 发布群聊密钥盒
 func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, groupID uint, keyVersion int, boxes []GroupKeyBoxUpload, keyWrapAlg string) error {
 	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
@@ -275,15 +301,6 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 		memberSet[member.UserID] = struct{}{}
 	}
 	seen := make(map[uint]struct{}, len(boxes))
-	// 检查哪些用户已经有密钥盒子（避免竞态条件导致不同用户用不同群密钥覆盖）
-	existingBoxes, err := s.groupKeyRepo.GetVersionBoxes(ctx, groupID, keyVersion)
-	if err != nil {
-		return err
-	}
-	existingUserIDs := make(map[uint]struct{}, len(existingBoxes))
-	for _, eb := range existingBoxes {
-		existingUserIDs[eb.UserID] = struct{}{}
-	}
 	modelBoxes := make([]*model.E2EEGroupKeyBox, 0, len(boxes))
 	for _, box := range boxes {
 		if box.UserID == 0 || strings.TrimSpace(box.WrappedGroupKey) == "" || strings.TrimSpace(box.WrapNonce) == "" {
@@ -294,10 +311,6 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 		}
 		if _, ok := seen[box.UserID]; ok {
 			return ErrE2EEGroupBoxesInvalid
-		}
-		// 如果目标用户已经有密钥盒子，跳过（避免竞态覆盖）
-		if _, exists := existingUserIDs[box.UserID]; exists {
-			continue
 		}
 		seen[box.UserID] = struct{}{}
 		wrappedRaw, err := decodeBase64URLOrStd(box.WrappedGroupKey)
@@ -318,13 +331,18 @@ func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, g
 			WrappedByUserID: currentUserID, // 记录加密者（当前用户）的ID
 		})
 	}
-	// 允许只上传部分成员的密钥盒子（每个用户只上传其他成员的盒子，不覆盖自己的 self-wrap）
-	if len(seen) == 0 {
+	if len(seen) != len(memberSet) {
 		return ErrE2EEGroupBoxesInvalid
 	}
-	// 如果所有盒子都被跳过了（所有用户都已有盒子），不需要更新数据库
-	if len(modelBoxes) == 0 {
-		return nil
+	if err := s.groupKeyRepo.ReplaceVersionBoxes(ctx, groupID, keyVersion, modelBoxes); err != nil {
+		switch {
+		case errors.Is(err, repo.ErrE2EEGroupKeyBoxesExist):
+			return ErrE2EEGroupBoxesPublished
+		case errors.Is(err, repo.ErrE2EEGroupKeyVersionStale):
+			return ErrE2EEGroupVersionLock
+		default:
+			return err
+		}
 	}
-	return s.groupKeyRepo.ReplaceVersionBoxes(ctx, groupID, keyVersion, modelBoxes)
+	return nil
 }

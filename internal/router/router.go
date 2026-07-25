@@ -103,6 +103,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	r.Post("/api/e2ee/keys/publish", auth, e2eeHandler.PublishPublicKey)
 	r.Get("/api/e2ee/keys/public", auth, e2eeHandler.GetPublicKey)
 	r.Post("/api/e2ee/group/key/publish", auth, e2eeHandler.PublishGroupKeyBoxes)
+	r.Post("/api/e2ee/group/key/rotate", auth, e2eeHandler.RotateGroupKey)
 	r.Get("/api/e2ee/group/key/current", auth, e2eeHandler.GetGroupCurrentKey)
 	r.Get("/api/e2ee/group/key/by-version", auth, e2eeHandler.GetGroupKeyByVersion)
 	r.Post("/api/user/delete", auth, userHandler.Delete)

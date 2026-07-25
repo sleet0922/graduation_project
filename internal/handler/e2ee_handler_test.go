@@ -17,6 +17,7 @@ type fakeE2EEService struct {
 	currentBoxFn   func(context.Context, uint, uint) (*model.E2EEGroupKeyBox, error)
 	versionFn      func(context.Context, uint) (int, error)
 	publishBoxesFn func(context.Context, uint, uint, int, []service.GroupKeyBoxUpload, string) error
+	rotateFn       func(context.Context, uint, uint, int) (int, error)
 }
 
 func (s *fakeE2EEService) PublishUserPublicKey(ctx context.Context, userID uint, keyType, publicKey string) (*model.E2EEUserPublicKey, error) {
@@ -53,6 +54,13 @@ func (s *fakeE2EEService) GetGroupCurrentVersion(ctx context.Context, groupID ui
 
 func (s *fakeE2EEService) RotateGroupKey(ctx context.Context, groupID, currentUserID uint) error {
 	return nil
+}
+
+func (s *fakeE2EEService) RotateGroupKeyIfCurrent(ctx context.Context, currentUserID, groupID uint, expectedVersion int) (int, error) {
+	if s.rotateFn != nil {
+		return s.rotateFn(ctx, currentUserID, groupID, expectedVersion)
+	}
+	return expectedVersion + 1, nil
 }
 
 func (s *fakeE2EEService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, groupID uint, keyVersion int, boxes []service.GroupKeyBoxUpload, keyWrapAlg string) error {
@@ -107,6 +115,7 @@ func TestE2EEHandlerGroupKeyResponses(t *testing.T) {
 	app := fiber.New()
 	app.Get("/current", withUser(7, handler.GetGroupCurrentKey))
 	app.Post("/boxes", withUser(7, handler.PublishGroupKeyBoxes))
+	app.Post("/rotate", withUser(7, handler.RotateGroupKey))
 
 	status, payload := testResponse(t, app, testJSONRequest("GET", "/current?group_id=1", nil))
 	if status != 428 || payload["message"] != "e2ee group key box not found, please upload key boxes" {
@@ -120,5 +129,13 @@ func TestE2EEHandlerGroupKeyResponses(t *testing.T) {
 	}))
 	if status != http.StatusConflict || payload["message"] != "e2ee group key version conflict" {
 		t.Fatalf("version lock response = status %d payload %#v", status, payload)
+	}
+
+	status, payload = testResponse(t, app, testJSONRequest("POST", "/rotate", map[string]any{
+		"group_id":             1,
+		"expected_key_version": 3,
+	}))
+	if status != http.StatusOK || payload["data"].(map[string]any)["key_version"] != float64(4) {
+		t.Fatalf("rotate response = status %d payload %#v", status, payload)
 	}
 }

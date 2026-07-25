@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -48,7 +50,7 @@ type LogConfig struct {
 }
 
 type ViperConfig struct {
-	Server   ServerConfig   `json:"server"`
+	Server   ServerConfig   `json:"server" mapstructure:"server"`
 	Database DatabaseConfig `json:"database" mapstructure:"database"`
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
@@ -56,26 +58,77 @@ type ViperConfig struct {
 	Log      LogConfig      `json:"log" mapstructure:"log"`
 	Redis    RedisConfig    `json:"redis" mapstructure:"redis"`
 }
+
 type RedisConfig struct {
-	Addr     string `json:"addr"`
-	Port     int    `json:"port"`
-	Password string `json:"password"`
-	DB       int    `json:"db"`
+	Addr     string `json:"addr" mapstructure:"addr"`
+	Port     int    `json:"port" mapstructure:"port"`
+	Password string `json:"password" mapstructure:"password"`
+	DB       int    `json:"db" mapstructure:"db"`
 }
 
-func InitConfig() *ViperConfig {
-	viper.SetConfigFile("configs/config.yaml")
-	viper.SetConfigType("yaml")
-	err := viper.ReadInConfig()
-	if err != nil {
-		panic(fmt.Sprintf("读取配置文件失败: %v", err))
+// LoadConfig reads a config file and applies deployment environment overrides.
+func LoadConfig(path string) (*ViperConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("config path is empty")
+	}
+
+	reader := viper.New()
+	reader.SetConfigFile(path)
+	reader.SetConfigType("yaml")
+	if err := reader.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	envOverrides := map[string]string{
+		"database.password":     "ZAT_DATABASE_PASSWORD",
+		"database.auto_migrate": "ZAT_DATABASE_AUTO_MIGRATE",
+		"jwt.secret_key":        "ZAT_JWT_SECRET",
+		"oss.access_key_id":     "ZAT_OSS_ACCESS_KEY_ID",
+		"oss.secret_access_key": "ZAT_OSS_SECRET_ACCESS_KEY",
+		"rtc.app_id":            "ZAT_RTC_APP_ID",
+		"rtc.app_key":           "ZAT_RTC_APP_KEY",
+	}
+	for key, envName := range envOverrides {
+		if value, ok := os.LookupEnv(envName); ok {
+			reader.Set(key, value)
+		}
 	}
 
 	var config ViperConfig
-	err = viper.Unmarshal(&config)
-	if err != nil {
-		panic(fmt.Sprintf("解析配置文件失败: %v", err))
+	if err := reader.Unmarshal(&config); err != nil {
+		return nil, fmt.Errorf("decode config: %w", err)
 	}
+	if err := validateConfig(&config); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
 
-	return &config
+func validateConfig(config *ViperConfig) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+	values := map[string]string{
+		"database.password":     config.Database.Password,
+		"jwt.secret_key":        config.JWT.SecretKey,
+		"oss.access_key_id":     config.OSS.AccessKeyID,
+		"oss.secret_access_key": config.OSS.SecretAccessKey,
+		"rtc.app_id":            config.RTC.AppID,
+		"rtc.app_key":           config.RTC.AppKey,
+	}
+	for name, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || strings.EqualFold(trimmed, "change-me") || strings.HasPrefix(trimmed, "SET_ZAT_") {
+			return fmt.Errorf("config value %s is missing or still a placeholder", name)
+		}
+	}
+	return nil
+}
+
+func InitConfig() *ViperConfig {
+	config, err := LoadConfig("configs/config.yaml")
+	if err != nil {
+		panic(fmt.Sprintf("load config failed: %v", err))
+	}
+	return config
 }
