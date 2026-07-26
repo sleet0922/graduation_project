@@ -664,7 +664,9 @@ RTC 相关 WebSocket 推送事件（通过聊天 WS 通道下发）：
 | peer_id | uint | 否 | |
 | group_id | uint | 否 | |
 
-**返回** `{ app_id, room_id, uid, token }`
+**返回** `{ url, room_id, uid, token }`
+
+其中 `url` 为客户端连接 LiveKit 房间的服务地址，`token` 为仅允许当前用户加入本次通话房间的短期 JWT。
 
 ---
 

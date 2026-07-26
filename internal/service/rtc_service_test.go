@@ -23,7 +23,7 @@ func TestRTCServiceInviteAcceptIssueTokenAndHangup(t *testing.T) {
 		invitePayloads = append(invitePayloads, payload)
 		return nil
 	}, nil)
-	rtcSvc := NewRTCService("app-id", "app-key", time.Hour, users, friends, newFakeGroupRepo(), chat)
+	rtcSvc := NewRTCService("http://localhost:7880", "api-key", "api-secret", time.Hour, users, friends, newFakeGroupRepo(), chat)
 
 	invite, err := rtcSvc.Invite(ctx, 1, RTCInviteRequest{PeerID: 2, CallType: "video"})
 	if err != nil {
@@ -48,8 +48,8 @@ func TestRTCServiceInviteAcceptIssueTokenAndHangup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
-	if token.AppID != "app-id" || token.UID != "2" || token.Token == "" {
-		t.Fatalf("token = %#v, want app-id, uid 2 and serialized token", token)
+	if token.URL != "http://localhost:7880" || token.UID != "2" || token.Token == "" {
+		t.Fatalf("token = %#v, want LiveKit URL, uid 2 and serialized token", token)
 	}
 
 	if err := rtcSvc.Hangup(ctx, 2, RTCCallIDRequest{CallID: invite.CallID}); err != nil {
@@ -65,7 +65,7 @@ func TestRTCServiceInviteValidation(t *testing.T) {
 	)
 	friends := newFakeFriendRepo()
 	chat := NewChatService(friends, newFakeGroupRepo())
-	rtcSvc := NewRTCService("app-id", "app-key", time.Hour, users, friends, newFakeGroupRepo(), chat)
+	rtcSvc := NewRTCService("http://localhost:7880", "api-key", "api-secret", time.Hour, users, friends, newFakeGroupRepo(), chat)
 
 	tests := []struct {
 		name string
@@ -107,7 +107,7 @@ func TestRTCServiceCallActionsValidation(t *testing.T) {
 	friends.friendships[[2]uint{1, 2}] = true
 	chat := NewChatService(friends, newFakeGroupRepo())
 	chat.RegisterConnection(ctx, 2, nil, func(payload any) error { return nil }, nil)
-	rtcSvc := NewRTCService("app-id", "app-key", time.Hour, users, friends, newFakeGroupRepo(), chat)
+	rtcSvc := NewRTCService("http://localhost:7880", "api-key", "api-secret", time.Hour, users, friends, newFakeGroupRepo(), chat)
 	invite, err := rtcSvc.Invite(ctx, 1, RTCInviteRequest{PeerID: 2, CallType: "voice"})
 	if err != nil {
 		t.Fatalf("Invite failed: %v", err)

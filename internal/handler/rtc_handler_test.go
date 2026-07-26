@@ -47,7 +47,7 @@ func (s *fakeRTCService) IssueToken(ctx context.Context, userID uint, req servic
 	if s.tokenFn != nil {
 		return s.tokenFn(ctx, userID, req)
 	}
-	return &service.RTCTokenPayload{AppID: "app", RoomID: req.RoomID, UID: "7", Token: "token"}, nil
+	return &service.RTCTokenPayload{URL: "http://localhost:7880", RoomID: req.RoomID, UID: "7", Token: "token"}, nil
 }
 
 func TestRTCHandlerInviteAndToken(t *testing.T) {

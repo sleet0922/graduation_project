@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -38,9 +39,10 @@ type JWTConfig struct {
 	RefreshTokenExpireSeconds int    `json:"refresh_token_expire_seconds" mapstructure:"refresh_token_expire_seconds"`
 }
 
-type RTCConfig struct {
-	AppID              string `json:"app_id" mapstructure:"app_id"`
-	AppKey             string `json:"app_key" mapstructure:"app_key"`
+type LiveKitConfig struct {
+	URL                string `json:"url" mapstructure:"url"`
+	APIKey             string `json:"api_key" mapstructure:"api_key"`
+	APISecret          string `json:"api_secret" mapstructure:"api_secret"`
 	TokenExpireSeconds int    `json:"token_expire_seconds" mapstructure:"token_expire_seconds"`
 }
 
@@ -54,7 +56,7 @@ type ViperConfig struct {
 	Database DatabaseConfig `json:"database" mapstructure:"database"`
 	OSS      OSSConfig      `json:"oss" mapstructure:"oss"`
 	JWT      JWTConfig      `json:"jwt" mapstructure:"jwt"`
-	RTC      RTCConfig      `json:"rtc" mapstructure:"rtc"`
+	LiveKit  LiveKitConfig  `json:"livekit" mapstructure:"livekit"`
 	Log      LogConfig      `json:"log" mapstructure:"log"`
 	Redis    RedisConfig    `json:"redis" mapstructure:"redis"`
 }
@@ -85,8 +87,9 @@ func LoadConfig(path string) (*ViperConfig, error) {
 		"jwt.secret_key":        "ZAT_JWT_SECRET",
 		"oss.access_key_id":     "ZAT_OSS_ACCESS_KEY_ID",
 		"oss.secret_access_key": "ZAT_OSS_SECRET_ACCESS_KEY",
-		"rtc.app_id":            "ZAT_RTC_APP_ID",
-		"rtc.app_key":           "ZAT_RTC_APP_KEY",
+		"livekit.url":           "ZAT_LIVEKIT_URL",
+		"livekit.api_key":       "ZAT_LIVEKIT_API_KEY",
+		"livekit.api_secret":    "ZAT_LIVEKIT_API_SECRET",
 	}
 	for key, envName := range envOverrides {
 		if value, ok := os.LookupEnv(envName); ok {
@@ -113,14 +116,27 @@ func validateConfig(config *ViperConfig) error {
 		"jwt.secret_key":        config.JWT.SecretKey,
 		"oss.access_key_id":     config.OSS.AccessKeyID,
 		"oss.secret_access_key": config.OSS.SecretAccessKey,
-		"rtc.app_id":            config.RTC.AppID,
-		"rtc.app_key":           config.RTC.AppKey,
+		"livekit.url":           config.LiveKit.URL,
+		"livekit.api_key":       config.LiveKit.APIKey,
+		"livekit.api_secret":    config.LiveKit.APISecret,
 	}
 	for name, value := range values {
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" || strings.EqualFold(trimmed, "change-me") || strings.HasPrefix(trimmed, "SET_ZAT_") {
 			return fmt.Errorf("config value %s is missing or still a placeholder", name)
 		}
+	}
+	liveKitURL, err := url.Parse(strings.TrimSpace(config.LiveKit.URL))
+	if err != nil || liveKitURL.Host == "" {
+		return fmt.Errorf("config value livekit.url is invalid")
+	}
+	switch strings.ToLower(liveKitURL.Scheme) {
+	case "http", "https", "ws", "wss":
+	default:
+		return fmt.Errorf("config value livekit.url must use http, https, ws, or wss")
+	}
+	if config.LiveKit.TokenExpireSeconds <= 0 {
+		return fmt.Errorf("config value livekit.token_expire_seconds must be positive")
 	}
 	return nil
 }

@@ -81,7 +81,7 @@ type RTCCallActionResponse struct {
 }
 
 type RTCTokenPayload struct {
-	AppID  string `json:"app_id"`
+	URL    string `json:"url"`
 	RoomID string `json:"room_id"`
 	UID    string `json:"uid"`
 	Token  string `json:"token"`
@@ -106,8 +106,9 @@ type rtcService struct {
 	friendRepo     repo.FriendRepository
 	groupRepo      repo.GroupRepository
 	chatService    ChatService
-	appID          string
-	appKey         string
+	url            string
+	apiKey         string
+	apiSecret      string
 	tokenLifetime  time.Duration
 	inviteTTL      time.Duration
 	mu             sync.RWMutex
@@ -125,14 +126,18 @@ func (e *RTCServiceError) Error() string {
 	return e.Message
 }
 
-func NewRTCService(appID, appKey string, tokenLifetime time.Duration, userRepo repo.UserRepository, friendRepo repo.FriendRepository, groupRepo repo.GroupRepository, chatService ChatService) RTCService {
+func NewRTCService(url, apiKey, apiSecret string, tokenLifetime time.Duration, userRepo repo.UserRepository, friendRepo repo.FriendRepository, groupRepo repo.GroupRepository, chatService ChatService) RTCService {
+	if tokenLifetime <= 0 {
+		tokenLifetime = defaultRTCTokenExpire
+	}
 	return &rtcService{
 		userRepo:       userRepo,
 		friendRepo:     friendRepo,
 		groupRepo:      groupRepo,
 		chatService:    chatService,
-		appID:          strings.TrimSpace(appID),
-		appKey:         strings.TrimSpace(appKey),
+		url:            strings.TrimSpace(url),
+		apiKey:         strings.TrimSpace(apiKey),
+		apiSecret:      strings.TrimSpace(apiSecret),
 		tokenLifetime:  tokenLifetime,
 		inviteTTL:      defaultRTCInviteTTL,
 		calls:          make(map[string]*rtcCall),
@@ -624,8 +629,8 @@ func (s *rtcService) IssueToken(ctx context.Context, userID uint, req RTCIssueTo
 	if callID == "" {
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "call_id 不能为空"}
 	}
-	if s.appID == "" || s.appKey == "" {
-		return nil, &RTCServiceError{HTTPCode: 500, Message: "RTC 服务端未配置 AppId 或 AppKey"}
+	if s.url == "" || s.apiKey == "" || s.apiSecret == "" {
+		return nil, &RTCServiceError{HTTPCode: 500, Message: "LiveKit 服务端配置不完整"}
 	}
 
 	s.mu.RLock()
@@ -665,16 +670,19 @@ func (s *rtcService) IssueToken(ctx context.Context, userID uint, req RTCIssueTo
 		return nil, &RTCServiceError{HTTPCode: 400, Message: "group_id 与当前通话不一致"}
 	}
 	uid := strconv.FormatUint(uint64(userID), 10)
-	expireAt := time.Now().Add(s.tokenLifetime)
-	token := rtc.NewAccessToken(s.appID, s.appKey, roomID, uid)
-	token.ExpireTime(expireAt)
-	token.AddPrivilege(rtc.PrivSubscribeStream, expireAt)
-	token.AddPrivilege(rtc.PrivPublishStream, expireAt)
+	expireSeconds := int(s.tokenLifetime.Seconds())
+	if expireSeconds <= 0 {
+		expireSeconds = int(defaultRTCTokenExpire.Seconds())
+	}
+	token, err := rtc.GenerateToken(s.apiKey, s.apiSecret, roomID, uid, expireSeconds)
+	if err != nil {
+		return nil, &RTCServiceError{HTTPCode: 500, Message: "生成 Token 失败"}
+	}
 	logger.Info("rtc token issued", "call_id", callID, "user_id", userID, "room_id", roomID, "call_status", status)
 	return &RTCTokenPayload{
-		AppID:  s.appID,
+		URL:    s.url,
 		RoomID: roomID,
 		UID:    uid,
-		Token:  token.Serialize(),
+		Token:  token,
 	}, nil
 }

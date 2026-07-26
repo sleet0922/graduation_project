@@ -41,11 +41,11 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)
 	feedService := service.NewFeedService(feedRepo, userRepo, db)
 
-	rtcTokenTTL := time.Duration(cfg.RTC.TokenExpireSeconds) * time.Second
+	rtcTokenTTL := time.Duration(cfg.LiveKit.TokenExpireSeconds) * time.Second
 	if rtcTokenTTL <= 0 {
 		rtcTokenTTL = 2 * time.Hour
 	}
-	rtcService := service.NewRTCService(cfg.RTC.AppID, cfg.RTC.AppKey, rtcTokenTTL, userRepo, friendRepo, groupRepo, chatService)
+	rtcService := service.NewRTCService(cfg.LiveKit.URL, cfg.LiveKit.APIKey, cfg.LiveKit.APISecret, rtcTokenTTL, userRepo, friendRepo, groupRepo, chatService)
 
 	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
 	refreshTokenTTL := time.Duration(cfg.JWT.RefreshTokenExpireSeconds) * time.Second
