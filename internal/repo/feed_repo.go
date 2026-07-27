@@ -33,7 +33,10 @@ type FeedRepository interface {
 
 	// 评论
 	CreateComment(ctx context.Context, comment *model.FeedComment) error
+	GetCommentByID(ctx context.Context, commentID uint) (*model.FeedComment, error)
 	DeleteComment(ctx context.Context, commentID uint, userID uint) (uint, bool, error)
+	// ForceDeleteComment 不校验 user_id（帖子作者删他人评论使用）
+	ForceDeleteComment(ctx context.Context, commentID uint) (uint, bool, error)
 	ListComments(ctx context.Context, postID uint, offset, limit int) ([]model.FeedComment, int64, error)
 	IncrementCommentCount(ctx context.Context, postID uint) error
 	DecrementCommentCount(ctx context.Context, postID uint) error
@@ -66,7 +69,6 @@ func (r *feedRepository) GetPostByID(ctx context.Context, postID uint) (*model.F
 		Preload("Media", func(db *gorm.DB) *gorm.DB {
 			return db.Order("sort_order ASC")
 		}).
-		Preload("Likes.User").
 		Preload("Comments", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at DESC").Limit(3)
 		}).
@@ -116,10 +118,6 @@ func (r *feedRepository) ListPosts(ctx context.Context, userID uint, offset, lim
 		Preload("Media", func(db *gorm.DB) *gorm.DB {
 			return db.Order("sort_order ASC")
 		}).
-		Preload("Likes", func(db *gorm.DB) *gorm.DB {
-			return db.Limit(5)
-		}).
-		Preload("Likes.User").
 		Preload("Comments", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at DESC").Limit(3)
 		}).
@@ -147,10 +145,6 @@ func (r *feedRepository) ListMyPosts(ctx context.Context, userID uint, offset, l
 		Preload("Media", func(db *gorm.DB) *gorm.DB {
 			return db.Order("sort_order ASC")
 		}).
-		Preload("Likes", func(db *gorm.DB) *gorm.DB {
-			return db.Limit(5)
-		}).
-		Preload("Likes.User").
 		Preload("Comments", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at DESC").Limit(3)
 		}).
@@ -244,10 +238,37 @@ func (r *feedRepository) CreateComment(ctx context.Context, comment *model.FeedC
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
+// GetCommentByID 按 ID 查询评论（不含软删除记录）
+func (r *feedRepository) GetCommentByID(ctx context.Context, commentID uint) (*model.FeedComment, error) {
+	var comment model.FeedComment
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", commentID).
+		First(&comment).Error
+	if err != nil {
+		return nil, err
+	}
+	return &comment, nil
+}
+
 func (r *feedRepository) DeleteComment(ctx context.Context, commentID uint, userID uint) (uint, bool, error) {
 	var comment model.FeedComment
 	if err := r.db.WithContext(ctx).
 		Where("id = ? AND user_id = ? AND deleted_at IS NULL", commentID, userID).
+		First(&comment).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	result := r.db.WithContext(ctx).Delete(&comment)
+	return comment.PostID, result.RowsAffected > 0, result.Error
+}
+
+// ForceDeleteComment 不校验 user_id，供帖子作者删他人评论使用
+func (r *feedRepository) ForceDeleteComment(ctx context.Context, commentID uint) (uint, bool, error) {
+	var comment model.FeedComment
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", commentID).
 		First(&comment).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return 0, false, nil

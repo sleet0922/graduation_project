@@ -270,20 +270,13 @@ func (s *feedService) IsLiked(ctx context.Context, userID, postID uint) (bool, e
 // ===================== 评论 =====================
 
 func (s *feedService) CreateComment(ctx context.Context, userID, postID uint, content string, replyToID *uint) (*model.FeedComment, error) {
-	// 检查帖子是否存在
+	// 权限 + 帖子存在性合并为一次 CanViewPost 检查
 	canView, err := s.feedRepo.CanViewPost(ctx, userID, postID)
 	if err != nil {
 		return nil, err
 	}
 	if !canView {
 		return nil, ErrPostNotFound
-	}
-	_, err = s.feedRepo.GetPostByID(ctx, postID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrPostNotFound
-		}
-		return nil, err
 	}
 
 	comment := &model.FeedComment{
@@ -304,11 +297,41 @@ func (s *feedService) CreateComment(ctx context.Context, userID, postID uint, co
 }
 
 func (s *feedService) DeleteComment(ctx context.Context, userID, commentID uint) error {
-	postID, deleted, err := s.feedRepo.DeleteComment(ctx, commentID, userID)
+	// 先取到评论，判断操作者权限：评论作者 或 帖子作者 均可删除
+	comment, err := s.feedRepo.GetCommentByID(ctx, commentID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCommentNotFound
+		}
+		return err
+	}
+
+	var postID uint
+	var deleted bool
+
+	if comment.UserID == userID {
+		// 评论作者删自己的评论
+		postID, deleted, err = s.feedRepo.DeleteComment(ctx, commentID, userID)
+	} else {
+		// 检查操作者是否为帖子作者
+		post, postErr := s.feedRepo.GetPostByID(ctx, comment.PostID)
+		if postErr != nil {
+			if errors.Is(postErr, gorm.ErrRecordNotFound) {
+				return ErrPostNotFound
+			}
+			return postErr
+		}
+		if post.UserID != userID {
+			return ErrNotPostOwner
+		}
+		// 帖子作者强制删除
+		postID, deleted, err = s.feedRepo.ForceDeleteComment(ctx, commentID)
+	}
+
 	if err != nil {
 		return err
 	}
-	if deleted {
+	if deleted && postID > 0 {
 		_ = s.feedRepo.DecrementCommentCount(ctx, postID)
 	}
 	return nil

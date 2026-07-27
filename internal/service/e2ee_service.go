@@ -145,6 +145,11 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 }
 
 func (s *e2eeService) notifyFriendsKeyChanged(userID uint) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("notifyFriendsKeyChanged panic recovered", "user_id", userID, "panic", r)
+		}
+	}()
 	ctx := context.Background()
 	friends, err := s.friendRepo.GetByUserID(ctx, userID)
 	if err != nil {

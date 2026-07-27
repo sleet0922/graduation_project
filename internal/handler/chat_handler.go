@@ -23,6 +23,7 @@ type chatIncomingMessage struct {
 	GroupID     uint   `json:"group_id"`
 	MessageType string `json:"message_type"`
 	Content     string `json:"content"`
+	MessageID   string `json:"message_id"` // recall 使用
 }
 
 type chatOutgoingMessage struct {
@@ -80,18 +81,33 @@ func (h *ChatHandler) Connect() fiber.Handler {
 			}
 
 			if incoming.Type != "chat" {
-				if incoming.Type == "ping" {
+				switch incoming.Type {
+				case "ping":
 					if err := c.WriteJSON(chatOutgoingMessage{Type: "pong"}); err != nil {
 						return
 					}
-					continue
-				}
-				logger.Warn("unsupported message type", slog.Any("user_id", userID), slog.String("type", incoming.Type))
-				if err := c.WriteJSON(chatOutgoingMessage{
-					Type:  "error",
-					Error: "不支持的消息类型",
-				}); err != nil {
-					return
+				case "mark_read":
+					// 通知对端已读：mark_read { to_user_id | group_id }
+					_ = h.chatService.MarkRead(ctx, userID, incoming.ToUserID, incoming.GroupID)
+				case "recall":
+					// 撤回消息：recall { to_user_id | group_id, message_id }
+					if err := h.chatService.RecallMessage(ctx, userID, incoming.ToUserID, incoming.GroupID, incoming.MessageID); err != nil {
+						logger.Warn("recall message failed", slog.Any("user_id", userID), slog.Any("error", err))
+						if writeErr := c.WriteJSON(chatOutgoingMessage{
+							Type:  "error",
+							Error: err.Error(),
+						}); writeErr != nil {
+							return
+						}
+					}
+				default:
+					logger.Warn("unsupported message type", slog.Any("user_id", userID), slog.String("type", incoming.Type))
+					if err := c.WriteJSON(chatOutgoingMessage{
+						Type:  "error",
+						Error: "不支持的消息类型",
+					}); err != nil {
+						return
+					}
 				}
 				continue
 			}

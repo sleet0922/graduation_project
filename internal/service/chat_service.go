@@ -18,7 +18,11 @@ var (
 	ErrMessageEmpty           = errors.New("消息内容不能为空")
 	ErrMessagePermission      = errors.New("只能给好友发送消息")
 	ErrGroupMessagePermission = errors.New("群聊已解散")
+	ErrRecallExpired          = errors.New("消息只能在发出后1分钟内撤回")
+	ErrRecallPermission       = errors.New("只能撤回自己发送的消息")
 )
+
+const messageRecallWindow = time.Minute
 
 type DeliveryFunc func(message *model.ChatMessage, offline bool) error
 
@@ -38,6 +42,10 @@ type ChatService interface {
 	RegisterConnection(ctx context.Context, userID uint, deliver DeliveryFunc, sysDeliver SystemDeliveryFunc, closeConn func(), opts ...RegisterConnectionOption) string
 	UnregisterConnection(userID uint, connectionID string)
 	SendMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error)
+	// RecallMessage 通知接收方（或群成员）撤回指定消息
+	RecallMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageID string) error
+	// MarkRead 通知发送方消息已被接收方读取
+	MarkRead(ctx context.Context, readerID, peerID, groupID uint) error
 	BroadcastGroupDissolved(ctx context.Context, groupID uint, userIDs []uint)
 	PushSystemEvent(ctx context.Context, userIDs []uint, payload any) []SystemPushResult
 	GetConnectionIDs(userID uint) []string
@@ -54,6 +62,13 @@ type chatConnection struct {
 type queuedSystemEvent struct {
 	id      string
 	payload any
+}
+
+type recentChatMessage struct {
+	fromUserID uint
+	toUserID   uint
+	groupID    uint
+	createdAt  time.Time
 }
 
 type registerConnectionOptions struct {
@@ -76,23 +91,67 @@ func WithConnectionClient(client string) RegisterConnectionOption {
 }
 
 type chatService struct {
-	friendRepo    repo.FriendRepository
-	groupRepo     repo.GroupRepository
-	mu            sync.RWMutex
-	sequence      uint64
-	connections   map[uint]map[string]*chatConnection
-	offline       map[uint][]*model.ChatMessage
-	systemOffline map[uint][]*queuedSystemEvent
+	friendRepo     repo.FriendRepository
+	groupRepo      repo.GroupRepository
+	mu             sync.RWMutex
+	sequence       uint64
+	connections    map[uint]map[string]*chatConnection
+	offline        map[uint][]*model.ChatMessage
+	systemOffline  map[uint][]*queuedSystemEvent
+	recentMessages map[string]recentChatMessage
 }
 
 func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupRepository) ChatService {
 	return &chatService{
-		friendRepo:    friendRepo,
-		groupRepo:     groupRepo,
-		connections:   make(map[uint]map[string]*chatConnection),
-		offline:       make(map[uint][]*model.ChatMessage),
-		systemOffline: make(map[uint][]*queuedSystemEvent),
+		friendRepo:     friendRepo,
+		groupRepo:      groupRepo,
+		connections:    make(map[uint]map[string]*chatConnection),
+		offline:        make(map[uint][]*model.ChatMessage),
+		systemOffline:  make(map[uint][]*queuedSystemEvent),
+		recentMessages: make(map[string]recentChatMessage),
 	}
+}
+
+func (s *chatService) trackRecentMessage(message *model.ChatMessage) {
+	cutoff := time.Now().Add(-messageRecallWindow)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, recent := range s.recentMessages {
+		if recent.createdAt.Before(cutoff) {
+			delete(s.recentMessages, id)
+		}
+	}
+	s.recentMessages[message.ID] = recentChatMessage{
+		fromUserID: message.FromUserID,
+		toUserID:   message.ToUserID,
+		groupID:    message.GroupID,
+		createdAt:  message.CreatedAt,
+	}
+}
+
+func (s *chatService) validateAndConsumeRecall(
+	fromUserID, toUserID, groupID uint,
+	messageID string,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recent, ok := s.recentMessages[messageID]
+	if !ok || time.Since(recent.createdAt) > messageRecallWindow {
+		delete(s.recentMessages, messageID)
+		return ErrRecallExpired
+	}
+	if recent.fromUserID != fromUserID {
+		return ErrRecallPermission
+	}
+	if recent.groupID > 0 {
+		if groupID != recent.groupID {
+			return ErrRecallPermission
+		}
+	} else if groupID > 0 || toUserID != recent.toUserID {
+		return ErrRecallPermission
+	}
+	delete(s.recentMessages, messageID)
+	return nil
 }
 
 // 从连接map中提取连接id列表
@@ -248,6 +307,7 @@ func (s *chatService) sendGroupMessage(ctx context.Context, fromUserID, groupID 
 		Content:          content,
 		CreatedAt:        time.Now(),
 	}
+	s.trackRecentMessage(message)
 	for _, member := range members {
 		if member.UserID == fromUserID {
 			continue
@@ -387,6 +447,7 @@ func (s *chatService) SendMessage(ctx context.Context, fromUserID, toUserID, gro
 		Content:          content,
 		CreatedAt:        time.Now(),
 	}
+	s.trackRecentMessage(message)
 	s.deliverToUser(ctx, toUserID, message)
 	return message, nil
 }
@@ -397,6 +458,80 @@ func (s *chatService) BroadcastGroupDissolved(ctx context.Context, groupID uint,
 		"type":     "group_dissolved",
 		"group_id": groupID,
 	})
+}
+
+// RecallMessage 通知接收方（或群成员）撤回指定消息
+// 由于消息无服务端持久化，只做信令转发；客户端负责本地删除
+func (s *chatService) RecallMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageID string) error {
+	if messageID == "" {
+		return fmt.Errorf("message_id 不能为空")
+	}
+	if err := s.validateAndConsumeRecall(fromUserID, toUserID, groupID, messageID); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"type":       "message_recalled",
+		"message_id": messageID,
+		"from_user":  fromUserID,
+	}
+	if groupID > 0 {
+		if !s.groupRepo.IsMember(ctx, groupID, fromUserID) {
+			return fmt.Errorf("不在该群聊中")
+		}
+		members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		payload["group_id"] = groupID
+		targets := make([]uint, 0, len(members))
+		for _, m := range members {
+			if m.UserID != fromUserID {
+				targets = append(targets, m.UserID)
+			}
+		}
+		s.PushSystemEvent(ctx, targets, payload)
+	} else {
+		if toUserID == 0 {
+			return fmt.Errorf("to_user_id 不能为空")
+		}
+		if !s.friendRepo.CheckFriendship(ctx, fromUserID, toUserID) {
+			return fmt.Errorf("只能撤回发给好友的消息")
+		}
+		s.PushSystemEvent(ctx, []uint{toUserID}, payload)
+	}
+	return nil
+}
+
+// MarkRead 通知发送方消息已被接收方读取
+func (s *chatService) MarkRead(ctx context.Context, readerID, peerID, groupID uint) error {
+	payload := map[string]any{
+		"type":      "read_ack",
+		"reader_id": readerID,
+	}
+	if groupID > 0 {
+		payload["group_id"] = groupID
+		if !s.groupRepo.IsMember(ctx, groupID, readerID) {
+			return nil // 静默忽略非成员的已读
+		}
+		members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+		if err != nil {
+			return nil
+		}
+		targets := make([]uint, 0, len(members))
+		for _, m := range members {
+			if m.UserID != readerID {
+				targets = append(targets, m.UserID)
+			}
+		}
+		s.PushSystemEvent(ctx, targets, payload)
+	} else {
+		if peerID == 0 {
+			return nil
+		}
+		payload["peer_id"] = peerID
+		s.PushSystemEvent(ctx, []uint{peerID}, payload)
+	}
+	return nil
 }
 
 // 推送系统事件

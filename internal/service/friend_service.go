@@ -29,12 +29,13 @@ type FriendService interface {
 }
 
 type friendService struct {
-	friendRepo repo.FriendRepository
-	userRepo   repo.UserRepository
+	friendRepo  repo.FriendRepository
+	userRepo    repo.UserRepository
+	chatService ChatService // 用于实时推送好友申请/接受通知
 }
 
-func NewFriendService(friendRepo repo.FriendRepository, userRepo repo.UserRepository) FriendService {
-	return &friendService{friendRepo: friendRepo, userRepo: userRepo}
+func NewFriendService(friendRepo repo.FriendRepository, userRepo repo.UserRepository, chatService ChatService) FriendService {
+	return &friendService{friendRepo: friendRepo, userRepo: userRepo, chatService: chatService}
 }
 
 // 发送好友请求
@@ -57,7 +58,17 @@ func (s *friendService) SendFriendRequest(ctx context.Context, senderID, receive
 		ReceiverID: receiverID,
 		Status:     0,
 	}
-	return s.friendRepo.SendFriendRequest(ctx, friendRequest)
+	if err := s.friendRepo.SendFriendRequest(ctx, friendRequest); err != nil {
+		return err
+	}
+	// 实时通知接收方：你有一条新的好友申请
+	if s.chatService != nil {
+		s.chatService.PushSystemEvent(ctx, []uint{receiverID}, map[string]any{
+			"type":      "friend_request",
+			"from_user": senderID,
+		})
+	}
+	return nil
 }
 
 func (s *friendService) SendFriendRequestByAccount(ctx context.Context, senderID uint, account string) (uint, error) {
@@ -93,11 +104,20 @@ func (s *friendService) HandleFriendRequest(ctx context.Context, userID, request
 		return nil
 	}
 	if status == 1 {
-		return s.friendRepo.AcceptFriendRequest(ctx, request)
-	} else {
-		request.Status = status
-		return s.friendRepo.UpdateRequestStatus(ctx, request)
+		if err := s.friendRepo.AcceptFriendRequest(ctx, request); err != nil {
+			return err
+		}
+		// 通知发起方：好友申请已被接受
+		if s.chatService != nil {
+			s.chatService.PushSystemEvent(ctx, []uint{request.SenderID}, map[string]any{
+				"type":      "friend_accepted",
+				"from_user": userID, // 接受方
+			})
+		}
+		return nil
 	}
+	request.Status = status
+	return s.friendRepo.UpdateRequestStatus(ctx, request)
 }
 
 // 获取用户的好友请求列表

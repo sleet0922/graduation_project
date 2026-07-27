@@ -115,6 +115,9 @@ type rtcService struct {
 	sequence       uint64
 	calls          map[string]*rtcCall
 	activeCallByID map[uint]string
+	// shutdownCtx/Cancel 用于在服务关闭时取消所有超时 goroutine
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 type RTCServiceError struct {
@@ -130,6 +133,7 @@ func NewRTCService(url, apiKey, apiSecret string, tokenLifetime time.Duration, u
 	if tokenLifetime <= 0 {
 		tokenLifetime = defaultRTCTokenExpire
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &rtcService{
 		userRepo:       userRepo,
 		friendRepo:     friendRepo,
@@ -142,6 +146,8 @@ func NewRTCService(url, apiKey, apiSecret string, tokenLifetime time.Duration, u
 		inviteTTL:      defaultRTCInviteTTL,
 		calls:          make(map[string]*rtcCall),
 		activeCallByID: make(map[uint]string),
+		shutdownCtx:    ctx,
+		shutdownCancel: cancel,
 	}
 }
 
@@ -284,7 +290,13 @@ func mustJSON(payload any) string {
 func (s *rtcService) scheduleTimeout(callID string) {
 	timer := time.NewTimer(s.inviteTTL)
 	defer timer.Stop()
-	<-timer.C
+	select {
+	case <-timer.C:
+		// 正常超时
+	case <-s.shutdownCtx.Done():
+		// 服务关闭，直接退出，不推送通知
+		return
+	}
 
 	s.mu.Lock()
 	call, ok := s.calls[callID]

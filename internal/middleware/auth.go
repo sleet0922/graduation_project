@@ -66,21 +66,7 @@ func (m *JWTMiddleware) Auth() fiber.Handler {
 	}
 }
 
-// WSAuth WebSocket 专用认证：额外校验 session_id 是否仍然有效（未被踢下线）
+// WSAuth 复用 Auth 中间件逻辑（WebSocket 与 REST 共用相同的会话校验）
 func (m *JWTMiddleware) WSAuth() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		claims := m.extractAndValidateToken(c)
-		if claims == nil {
-			return nil
-		}
-		// 校验 session 是否仍然有效（未被新登录踢下线）
-		if !redisPkg.IsSessionValid(uint(claims.UserID), claims.SessionID) {
-			_ = response.Error(c, fiber.StatusUnauthorized, "账号在其他设备登录，请重新登录")
-			return nil
-		}
-		c.Locals("user_id", uint(claims.UserID))
-		c.Locals("account", claims.Account)
-		c.Locals("session_id", claims.SessionID)
-		return c.Next()
-	}
+	return m.Auth()
 }

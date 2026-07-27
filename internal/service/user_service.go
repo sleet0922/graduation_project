@@ -47,17 +47,32 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 	return &userService{userRepo: userRepo}
 }
 
-// 生成随机账号
-func (s *userService) generateRandomAccount() string {
-	prefix, _ := rand.Int(rand.Reader, big.NewInt(9))
-	suffix, _ := rand.Int(rand.Reader, big.NewInt(1000000000))
-	return fmt.Sprintf("%d%09d", prefix.Int64()+1, suffix.Int64())
+// 生成随机账号（最多重试 5 次确保唯一性）
+func (s *userService) generateRandomAccount(ctx context.Context) (string, error) {
+	for i := 0; i < 5; i++ {
+		prefix, _ := rand.Int(rand.Reader, big.NewInt(9))
+		suffix, _ := rand.Int(rand.Reader, big.NewInt(1000000000))
+		account := fmt.Sprintf("%d%09d", prefix.Int64()+1, suffix.Int64())
+		_, err := s.userRepo.GetByAccount(ctx, account)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 账号不存在，可以使用
+			return account, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		// 账号已存在，继续重试
+	}
+	return "", fmt.Errorf("无法生成唯一账号，请重试")
 }
 
 // 用户注册
 func (s *userService) Register(ctx context.Context, email, password string) (*model.User, error) {
-	account := s.generateRandomAccount()
-	_, err := s.userRepo.GetByEmail(ctx, email)
+	account, err := s.generateRandomAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.userRepo.GetByEmail(ctx, email)
 	if err == nil {
 		return nil, ErrUserAlreadyExists
 	}

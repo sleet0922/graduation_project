@@ -15,6 +15,8 @@ type GroupRepository interface {
 	DeleteGroup(ctx context.Context, groupID uint) error
 	GetByID(ctx context.Context, groupID uint) (*model.ChatGroup, error)
 	GetGroupsByUserID(ctx context.Context, userID uint) ([]*model.ChatGroup, error)
+	// GetGroupsByUserIDWithMemberCounts 一次查询获取群列表和对应成员数，避免 N+1
+	GetGroupsByUserIDWithMemberCounts(ctx context.Context, userID uint) ([]*model.ChatGroup, map[uint]int64, error)
 	GetMembersByGroupID(ctx context.Context, groupID uint) ([]*model.ChatGroupMember, error)
 	CountMembers(ctx context.Context, groupID uint) (int64, error)
 	IsMember(ctx context.Context, groupID, userID uint) bool
@@ -96,6 +98,40 @@ func (r *groupRepository) GetGroupsByUserID(ctx context.Context, userID uint) ([
 		Order("chat_group.updated_at desc").
 		Find(&groups).Error
 	return groups, err
+}
+
+// 数据库 一次查询群列表及各群成员数，避免 N+1
+func (r *groupRepository) GetGroupsByUserIDWithMemberCounts(ctx context.Context, userID uint) ([]*model.ChatGroup, map[uint]int64, error) {
+	groups, err := r.GetGroupsByUserID(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(groups) == 0 {
+		return groups, make(map[uint]int64), nil
+	}
+	groupIDs := make([]uint, len(groups))
+	for i, g := range groups {
+		groupIDs[i] = g.ID
+	}
+
+	type countRow struct {
+		GroupID uint
+		Count   int64
+	}
+	var rows []countRow
+	err = r.db.WithContext(ctx).Model(&model.ChatGroupMember{}).
+		Select("group_id, COUNT(*) AS count").
+		Where("group_id IN ? AND deleted_at IS NULL", groupIDs).
+		Group("group_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	counts := make(map[uint]int64, len(rows))
+	for _, row := range rows {
+		counts[row.GroupID] = row.Count
+	}
+	return groups, counts, nil
 }
 
 // 数据库 群ID查询群成员列表

@@ -112,7 +112,7 @@ func TestUserHandlerRegister(t *testing.T) {
 	app := fiber.New()
 	app.Post("/register", handler.Register)
 
-	status, payload := testResponse(t, app, testJSONRequest("POST", "/register", map[string]any{"email": "a@example.com", "password": "secret"}))
+	status, payload := testResponse(t, app, testJSONRequest("POST", "/register", map[string]any{"email": "a@example.com", "password": "secret123"}))
 	if status != http.StatusOK || int(payload["code"].(float64)) != errcode.Success {
 		t.Fatalf("register response = status %d payload %#v, want success", status, payload)
 	}
@@ -129,7 +129,7 @@ func TestUserHandlerRegister(t *testing.T) {
 	}, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil)
 	app = fiber.New()
 	app.Post("/register", duplicate.Register)
-	status, payload = testResponse(t, app, testJSONRequest("POST", "/register", map[string]any{"email": "a@example.com", "password": "secret"}))
+	status, payload = testResponse(t, app, testJSONRequest("POST", "/register", map[string]any{"email": "a@example.com", "password": "secret123"}))
 	if status != http.StatusOK || int(payload["code"].(float64)) != errcode.ErrorUserExist {
 		t.Fatalf("duplicate response = status %d payload %#v, want ErrorUserExist", status, payload)
 	}
@@ -161,7 +161,7 @@ func TestUserHandlerAuthenticatedEndpoints(t *testing.T) {
 		t.Fatalf("unauth self response = status %d payload %#v", status, payload)
 	}
 
-	status, payload = testResponse(t, app, testJSONRequest("POST", "/password", map[string]any{"password": "old", "new_password": "new"}))
+	status, payload = testResponse(t, app, testJSONRequest("POST", "/password", map[string]any{"password": "old-password", "new_password": "new-password"}))
 	if status != http.StatusUnauthorized || int(payload["code"].(float64)) != errcode.ErrorPasswordCheck {
 		t.Fatalf("password response = status %d payload %#v, want old password error", status, payload)
 	}

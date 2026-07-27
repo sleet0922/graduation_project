@@ -177,6 +177,14 @@ func (s *groupService) AddMembers(ctx context.Context, operatorID, groupID uint,
 			return nil, err
 		}
 	}
+	// 实时通知被拉入群的成员
+	if s.chatService != nil && len(memberIDs) > 0 {
+		s.chatService.PushSystemEvent(ctx, memberIDs, map[string]any{
+			"type":        "group_member_added",
+			"group_id":    groupID,
+			"operator_id": operatorID,
+		})
+	}
 	return s.GetMembers(ctx, operatorID, groupID)
 }
 
@@ -201,6 +209,14 @@ func (s *groupService) RemoveMember(ctx context.Context, operatorID, groupID, me
 	if s.e2ee != nil {
 		return s.e2ee.RotateGroupKey(ctx, groupID, operatorID)
 	}
+	// 通知被踢出的成员
+	if s.chatService != nil {
+		s.chatService.PushSystemEvent(ctx, []uint{memberID}, map[string]any{
+			"type":        "group_member_removed",
+			"group_id":    groupID,
+			"operator_id": operatorID,
+		})
+	}
 	return nil
 }
 
@@ -221,6 +237,14 @@ func (s *groupService) LeaveGroup(ctx context.Context, userID, groupID uint) err
 	}
 	if s.e2ee != nil {
 		return s.e2ee.RotateGroupKey(ctx, groupID, userID)
+	}
+	// 通知群主：有人离开了群聊
+	if s.chatService != nil && group.OwnerID != userID {
+		s.chatService.PushSystemEvent(ctx, []uint{group.OwnerID}, map[string]any{
+			"type":     "group_member_left",
+			"group_id": groupID,
+			"user_id":  userID,
+		})
 	}
 	return nil
 }
@@ -259,17 +283,21 @@ func (s *groupService) DeleteGroup(ctx context.Context, operatorID, groupID uint
 
 // 获取用户的群聊列表
 func (s *groupService) GetGroups(ctx context.Context, userID uint) ([]*model.ChatGroupDetail, error) {
-	groups, err := s.groupRepo.GetGroupsByUserID(ctx, userID)
+	groups, counts, err := s.groupRepo.GetGroupsByUserIDWithMemberCounts(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]*model.ChatGroupDetail, 0, len(groups))
 	for _, group := range groups {
-		detail, err := s.buildGroupDetail(ctx, group)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, detail)
+		result = append(result, &model.ChatGroupDetail{
+			ID:          group.ID,
+			Name:        group.Name,
+			Avatar:      group.Avatar,
+			OwnerID:     group.OwnerID,
+			MemberCount: counts[group.ID],
+			CreatedAt:   group.CreatedAt,
+			UpdatedAt:   group.UpdatedAt,
+		})
 	}
 	return result, nil
 }

@@ -1,0 +1,39 @@
+http://eo.gelsomino.cn:81 {
+    root * /var/www/html
+    file_server {
+        index index.html
+    }
+}
+
+https://eo.gelsomino.cn:444 {
+    tls /ssl/1.pem /ssl/1.key
+
+    # LiveKit's signaling endpoint. Keep /rtc in the upstream request URI.
+    @livekit path /rtc /rtc/*
+    handle @livekit {
+        reverse_proxy 127.0.0.1:7880
+    }
+
+    # The Go application owns both its REST API and authenticated WebSockets.
+    @api path /api /api/*
+    handle @api {
+        reverse_proxy 127.0.0.1:8081
+    }
+
+    @websocket path /ws /ws/*
+    handle @websocket {
+        reverse_proxy 127.0.0.1:8081
+    }
+
+    root * /var/www/html
+    @static file
+    handle @static {
+        file_server {
+            index index.html
+        }
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:8081
+    }
+}

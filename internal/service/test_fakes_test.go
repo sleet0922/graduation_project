@@ -450,6 +450,29 @@ func (r *fakeGroupRepo) GetGroupsByUserID(ctx context.Context, userID uint) ([]*
 	return groups, nil
 }
 
+func (r *fakeGroupRepo) GetGroupsByUserIDWithMemberCounts(ctx context.Context, userID uint) ([]*model.ChatGroup, map[uint]int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return nil, nil, r.err
+	}
+	groups := make([]*model.ChatGroup, 0)
+	counts := make(map[uint]int64)
+	for groupID, memberMap := range r.members {
+		if _, ok := memberMap[userID]; !ok {
+			continue
+		}
+		group, ok := r.groups[groupID]
+		if !ok {
+			continue
+		}
+		copied := *group
+		groups = append(groups, &copied)
+		counts[groupID] = int64(len(memberMap))
+	}
+	return groups, counts, nil
+}
+
 func (r *fakeGroupRepo) GetMembersByGroupID(ctx context.Context, groupID uint) ([]*model.ChatGroupMember, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

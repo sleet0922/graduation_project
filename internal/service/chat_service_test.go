@@ -4,9 +4,54 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"sleet0922/graduation_project/internal/model"
 )
+
+func TestChatServiceRecallWindowAndOwnership(t *testing.T) {
+	ctx := context.Background()
+	friendRepo := newFakeFriendRepo()
+	friendRepo.friendships[[2]uint{1, 2}] = true
+	svc := NewChatService(friendRepo, newFakeGroupRepo())
+
+	var recalledEvent map[string]any
+	svc.RegisterConnection(ctx, 2, func(*model.ChatMessage, bool) error {
+		return nil
+	}, func(payload any) error {
+		recalledEvent, _ = payload.(map[string]any)
+		return nil
+	}, nil)
+
+	message, err := svc.SendMessage(ctx, 1, 2, 0, "text", "hello")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	if err := svc.RecallMessage(ctx, 3, 2, 0, message.ID); !errors.Is(err, ErrRecallPermission) {
+		t.Fatalf("other user recall error = %v, want ErrRecallPermission", err)
+	}
+	if err := svc.RecallMessage(ctx, 1, 2, 0, message.ID); err != nil {
+		t.Fatalf("owner recall failed: %v", err)
+	}
+	if recalledEvent["type"] != "message_recalled" || recalledEvent["message_id"] != message.ID {
+		t.Fatalf("recall event = %#v", recalledEvent)
+	}
+
+	expired, err := svc.SendMessage(ctx, 1, 2, 0, "text", "too old")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	implementation := svc.(*chatService)
+	implementation.mu.Lock()
+	recent := implementation.recentMessages[expired.ID]
+	recent.createdAt = time.Now().Add(-messageRecallWindow - time.Second)
+	implementation.recentMessages[expired.ID] = recent
+	implementation.mu.Unlock()
+
+	if err := svc.RecallMessage(ctx, 1, 2, 0, expired.ID); !errors.Is(err, ErrRecallExpired) {
+		t.Fatalf("expired recall error = %v, want ErrRecallExpired", err)
+	}
+}
 
 func TestChatServiceSendSingleMessage(t *testing.T) {
 	ctx := context.Background()

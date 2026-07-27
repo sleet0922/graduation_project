@@ -48,7 +48,7 @@ func TestFriendServiceSendFriendRequest(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(friendRepo)
 			}
-			svc := NewFriendService(friendRepo, newFakeUserRepo())
+			svc := NewFriendService(friendRepo, newFakeUserRepo(), nil)
 
 			err := svc.SendFriendRequest(ctx, tt.from, tt.to)
 			if !errors.Is(err, tt.wantErr) {
@@ -67,7 +67,7 @@ func TestFriendServiceSendFriendRequestByAccount(t *testing.T) {
 		testUser(2, "1000000002", "friend@example.com"),
 	)
 	friendRepo := newFakeFriendRepo()
-	svc := NewFriendService(friendRepo, userRepo)
+	svc := NewFriendService(friendRepo, userRepo, nil)
 
 	receiverID, err := svc.SendFriendRequestByAccount(ctx, 1, "friend@example.com")
 	if err != nil {
@@ -87,7 +87,7 @@ func TestFriendServiceHandleFriendRequest(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("validates status before querying repository", func(t *testing.T) {
-		svc := NewFriendService(newFakeFriendRepo(), newFakeUserRepo())
+		svc := NewFriendService(newFakeFriendRepo(), newFakeUserRepo(), nil)
 		err := svc.HandleFriendRequest(ctx, 2, 1, 9)
 		if !errors.Is(err, ErrInvalidFriendRequestStatus) {
 			t.Fatalf("HandleFriendRequest error = %v, want ErrInvalidFriendRequestStatus", err)
@@ -97,7 +97,7 @@ func TestFriendServiceHandleFriendRequest(t *testing.T) {
 	t.Run("rejects non receiver", func(t *testing.T) {
 		repo := newFakeFriendRepo()
 		repo.requests[1] = &model.FriendRequest{Model: gorm.Model{ID: 1}, SenderID: 1, ReceiverID: 2, Status: 0}
-		svc := NewFriendService(repo, newFakeUserRepo())
+		svc := NewFriendService(repo, newFakeUserRepo(), nil)
 
 		err := svc.HandleFriendRequest(ctx, 3, 1, 1)
 		if !errors.Is(err, ErrFriendRequestPermission) {
@@ -108,7 +108,7 @@ func TestFriendServiceHandleFriendRequest(t *testing.T) {
 	t.Run("accepts pending request", func(t *testing.T) {
 		repo := newFakeFriendRepo()
 		repo.requests[1] = &model.FriendRequest{Model: gorm.Model{ID: 1}, SenderID: 1, ReceiverID: 2, Status: 0}
-		svc := NewFriendService(repo, newFakeUserRepo())
+		svc := NewFriendService(repo, newFakeUserRepo(), nil)
 
 		if err := svc.HandleFriendRequest(ctx, 2, 1, 1); err != nil {
 			t.Fatalf("HandleFriendRequest accept failed: %v", err)
@@ -121,7 +121,7 @@ func TestFriendServiceHandleFriendRequest(t *testing.T) {
 	t.Run("rejects pending request", func(t *testing.T) {
 		repo := newFakeFriendRepo()
 		repo.requests[1] = &model.FriendRequest{Model: gorm.Model{ID: 1}, SenderID: 1, ReceiverID: 2, Status: 0}
-		svc := NewFriendService(repo, newFakeUserRepo())
+		svc := NewFriendService(repo, newFakeUserRepo(), nil)
 
 		if err := svc.HandleFriendRequest(ctx, 2, 1, 2); err != nil {
 			t.Fatalf("HandleFriendRequest reject failed: %v", err)
@@ -132,7 +132,7 @@ func TestFriendServiceHandleFriendRequest(t *testing.T) {
 	})
 
 	t.Run("missing request bubbles not found", func(t *testing.T) {
-		svc := NewFriendService(newFakeFriendRepo(), newFakeUserRepo())
+		svc := NewFriendService(newFakeFriendRepo(), newFakeUserRepo(), nil)
 		err := svc.HandleFriendRequest(ctx, 2, 404, 1)
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			t.Fatalf("HandleFriendRequest error = %v, want gorm.ErrRecordNotFound", err)

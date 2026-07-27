@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/errcode"
@@ -15,6 +16,14 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+)
+
+// emailRegex 用于校验邮箱格式
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+const (
+	minPasswordLen = 8
+	maxPasswordLen = 128
 )
 
 type UserHandler struct {
@@ -102,6 +111,15 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.BodyParser(&req); err != nil || req.Email == "" || req.Password == "" {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
+	}
+	if !emailRegex.MatchString(req.Email) {
+		return response.Error(c, http.StatusBadRequest, "邮箱格式不正确")
+	}
+	if len(req.Password) < minPasswordLen {
+		return response.Error(c, http.StatusBadRequest, "密码长度不得少于8位")
+	}
+	if len(req.Password) > maxPasswordLen {
+		return response.Error(c, http.StatusBadRequest, "密码长度不得超过128位")
 	}
 	user, err := h.userService.Register(c.Context(), req.Email, req.Password)
 	if err != nil {
@@ -337,6 +355,12 @@ func (h *UserHandler) UpdatePassword(c *fiber.Ctx) error {
 	var req UpdatePasswordRequest
 	if err := c.BodyParser(&req); err != nil || req.Password == "" || req.NewPassword == "" {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
+	}
+	if len(req.NewPassword) < minPasswordLen {
+		return response.Error(c, http.StatusBadRequest, "新密码长度不得少于8位")
+	}
+	if len(req.NewPassword) > maxPasswordLen {
+		return response.Error(c, http.StatusBadRequest, "新密码长度不得超过128位")
 	}
 	userID, err := GetUserID(c)
 	if err != nil {
