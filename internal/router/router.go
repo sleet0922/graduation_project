@@ -57,7 +57,7 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 
 	friendHandler := handler.NewFriendHandler(friendService)
 	groupHandler := handler.NewGroupHandler(groupService)
-	chatHandler := handler.NewChatHandler(chatService)
+	chatHandler := handler.NewChatHandler(chatService, rtcService)
 	onlineHandler := handler.NewOnlineHandler(chatService)
 	rtcHandler := handler.NewRTCHandler(rtcService)
 	e2eeHandler := handler.NewE2EEHandler(e2eeService)

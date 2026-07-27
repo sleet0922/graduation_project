@@ -37,6 +37,7 @@ type RTCService interface {
 	Reject(ctx context.Context, userID uint, req RTCRejectRequest) error
 	Cancel(ctx context.Context, userID uint, req RTCCallIDRequest) error
 	Hangup(ctx context.Context, userID uint, req RTCCallIDRequest) error
+	HandleParticipantDisconnected(ctx context.Context, userID uint) error
 	IssueToken(ctx context.Context, userID uint, req RTCIssueTokenRequest) (*RTCTokenPayload, error)
 }
 
@@ -626,6 +627,50 @@ func (s *rtcService) Hangup(ctx context.Context, userID uint, req RTCCallIDReque
 	logger.Info("rtc call hangup", "call_id", callID, "user_id", userID)
 	s.pushSystemEvent(ctx, notifyIDs, map[string]any{
 		"type":    "rtc_hangup",
+		"call_id": callID,
+	})
+	return nil
+}
+
+func (s *rtcService) HandleParticipantDisconnected(ctx context.Context, userID uint) error {
+	s.mu.Lock()
+	callID, ok := s.activeCallByID[userID]
+	if !ok {
+		s.mu.Unlock()
+		return nil
+	}
+	call, ok := s.calls[callID]
+	if !ok {
+		delete(s.activeCallByID, userID)
+		s.mu.Unlock()
+		return nil
+	}
+	if isTerminalStatus(call.Status) {
+		delete(s.activeCallByID, userID)
+		s.mu.Unlock()
+		return nil
+	}
+	if call.PeerID == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+
+	eventType := "rtc_hangup"
+	if call.Status == rtcCallStatusPending {
+		call.Status = rtcCallStatusCanceled
+		eventType = "rtc_cancel"
+	} else {
+		call.Status = rtcCallStatusEnded
+	}
+	notifyIDs := s.otherParticipantIDs(call, userID)
+	for _, participantID := range s.participantIDs(call) {
+		delete(s.activeCallByID, participantID)
+	}
+	s.mu.Unlock()
+
+	logger.Info("rtc call terminated after participant disconnect", "call_id", callID, "user_id", userID, "event_type", eventType)
+	s.pushSystemEvent(ctx, notifyIDs, map[string]any{
+		"type":    eventType,
 		"call_id": callID,
 	})
 	return nil

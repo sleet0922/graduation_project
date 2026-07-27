@@ -12,9 +12,10 @@ import (
 )
 
 type fakeRTCService struct {
-	inviteFn func(context.Context, uint, service.RTCInviteRequest) (*service.RTCInviteResponse, error)
-	acceptFn func(context.Context, uint, service.RTCAcceptRequest) (*service.RTCCallActionResponse, error)
-	tokenFn  func(context.Context, uint, service.RTCIssueTokenRequest) (*service.RTCTokenPayload, error)
+	inviteFn       func(context.Context, uint, service.RTCInviteRequest) (*service.RTCInviteResponse, error)
+	acceptFn       func(context.Context, uint, service.RTCAcceptRequest) (*service.RTCCallActionResponse, error)
+	tokenFn        func(context.Context, uint, service.RTCIssueTokenRequest) (*service.RTCTokenPayload, error)
+	disconnectedFn func(context.Context, uint) error
 }
 
 func (s *fakeRTCService) Invite(ctx context.Context, userID uint, req service.RTCInviteRequest) (*service.RTCInviteResponse, error) {
@@ -40,6 +41,13 @@ func (s *fakeRTCService) Cancel(ctx context.Context, userID uint, req service.RT
 }
 
 func (s *fakeRTCService) Hangup(ctx context.Context, userID uint, req service.RTCCallIDRequest) error {
+	return nil
+}
+
+func (s *fakeRTCService) HandleParticipantDisconnected(ctx context.Context, userID uint) error {
+	if s.disconnectedFn != nil {
+		return s.disconnectedFn(ctx, userID)
+	}
 	return nil
 }
 

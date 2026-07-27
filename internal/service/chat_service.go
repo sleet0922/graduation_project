@@ -9,6 +9,7 @@ import (
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/redis"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,11 +50,13 @@ type ChatService interface {
 	BroadcastGroupDissolved(ctx context.Context, groupID uint, userIDs []uint)
 	PushSystemEvent(ctx context.Context, userIDs []uint, payload any) []SystemPushResult
 	GetConnectionIDs(userID uint) []string
+	HasConnectionClient(userID uint, client string) bool
 	KickUserConnections(userID uint, reason string)
 }
 
 type chatConnection struct {
 	id         string
+	client     string
 	deliver    DeliveryFunc
 	sysDeliver SystemDeliveryFunc
 	closeFn    func()
@@ -88,6 +91,13 @@ func WithConnectionClient(client string) RegisterConnectionOption {
 	return func(opts *registerConnectionOptions) {
 		opts.Client = client
 	}
+}
+
+func normalizeConnectionClient(client string) string {
+	if strings.EqualFold(strings.TrimSpace(client), "background") {
+		return "background"
+	}
+	return "foreground"
 }
 
 type chatService struct {
@@ -329,6 +339,7 @@ func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliv
 			opt(&options)
 		}
 	}
+	options.Client = normalizeConnectionClient(options.Client)
 
 	connectionID := fmt.Sprintf("%d", atomic.AddUint64(&s.sequence, 1))
 	s.mu.Lock()
@@ -337,6 +348,7 @@ func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliv
 	}
 	s.connections[userID][connectionID] = &chatConnection{
 		id:         connectionID,
+		client:     options.Client,
 		deliver:    deliver,
 		sysDeliver: sysDeliver,
 		closeFn:    closeConn,
@@ -600,6 +612,18 @@ func (s *chatService) GetConnectionIDs(userID uint) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return connectionIDsFromMap(s.connections[userID])
+}
+
+func (s *chatService) HasConnectionClient(userID uint, client string) bool {
+	client = normalizeConnectionClient(client)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, connection := range s.connections[userID] {
+		if connection.client == client {
+			return true
+		}
+	}
+	return false
 }
 
 // 踢掉指定用户的所有连接，先推送kicked消息再关闭

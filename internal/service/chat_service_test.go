@@ -96,6 +96,30 @@ func TestChatServiceSendSingleMessage(t *testing.T) {
 	}
 }
 
+func TestChatServiceTracksConnectionClients(t *testing.T) {
+	ctx := context.Background()
+	svc := NewChatService(newFakeFriendRepo(), newFakeGroupRepo())
+
+	foregroundID := svc.RegisterConnection(ctx, 7, nil, nil, nil, WithConnectionClient("foreground"))
+	backgroundID := svc.RegisterConnection(ctx, 7, nil, nil, nil, WithConnectionClient("background"))
+	if !svc.HasConnectionClient(7, "foreground") || !svc.HasConnectionClient(7, "background") {
+		t.Fatal("registered foreground and background connections were not tracked")
+	}
+
+	svc.UnregisterConnection(7, backgroundID)
+	if !svc.HasConnectionClient(7, "foreground") {
+		t.Fatal("removing background connection removed foreground presence")
+	}
+	if svc.HasConnectionClient(7, "background") {
+		t.Fatal("background connection remained present after unregister")
+	}
+
+	svc.UnregisterConnection(7, foregroundID)
+	if svc.HasConnectionClient(7, "foreground") {
+		t.Fatal("foreground connection remained present after unregister")
+	}
+}
+
 func TestChatServiceOfflineQueuesAreDrainedOnRegister(t *testing.T) {
 	ctx := context.Background()
 	friendRepo := newFakeFriendRepo()

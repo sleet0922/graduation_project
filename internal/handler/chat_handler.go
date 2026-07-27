@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/service"
@@ -14,8 +16,14 @@ import (
 )
 
 type ChatHandler struct {
-	chatService service.ChatService
+	chatService               service.ChatService
+	rtcService                service.RTCService
+	foregroundDisconnectGrace time.Duration
+	disconnectMu              sync.Mutex
+	disconnectTimers          map[uint]*time.Timer
 }
+
+const defaultForegroundDisconnectGrace = 3 * time.Second
 
 type chatIncomingMessage struct {
 	Type        string `json:"type"`
@@ -35,15 +43,62 @@ type chatOutgoingMessage struct {
 	Error   string             `json:"error,omitempty"`
 }
 
-func NewChatHandler(chatService service.ChatService) *ChatHandler {
-	return &ChatHandler{chatService: chatService}
+func NewChatHandler(chatService service.ChatService, rtcService service.RTCService) *ChatHandler {
+	return &ChatHandler{
+		chatService:               chatService,
+		rtcService:                rtcService,
+		foregroundDisconnectGrace: defaultForegroundDisconnectGrace,
+		disconnectTimers:          make(map[uint]*time.Timer),
+	}
+}
+
+func (h *ChatHandler) cancelForegroundDisconnect(userID uint) {
+	h.disconnectMu.Lock()
+	defer h.disconnectMu.Unlock()
+	if timer := h.disconnectTimers[userID]; timer != nil {
+		timer.Stop()
+		delete(h.disconnectTimers, userID)
+	}
+}
+
+func (h *ChatHandler) scheduleForegroundDisconnect(userID uint) {
+	if h.rtcService == nil {
+		return
+	}
+
+	h.disconnectMu.Lock()
+	if previous := h.disconnectTimers[userID]; previous != nil {
+		previous.Stop()
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(h.foregroundDisconnectGrace, func() {
+		h.disconnectMu.Lock()
+		if h.disconnectTimers[userID] != timer {
+			h.disconnectMu.Unlock()
+			return
+		}
+		delete(h.disconnectTimers, userID)
+		h.disconnectMu.Unlock()
+
+		if h.chatService.HasConnectionClient(userID, "foreground") {
+			return
+		}
+		if err := h.rtcService.HandleParticipantDisconnected(context.Background(), userID); err != nil {
+			logger.Warn("failed to terminate rtc call after websocket disconnect", slog.Any("user_id", userID), slog.Any("error", err))
+		}
+	})
+	h.disconnectTimers[userID] = timer
+	h.disconnectMu.Unlock()
 }
 
 // 建立聊天 WebSocket 连接
 func (h *ChatHandler) Connect() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
 		userID := c.Locals("user_id").(uint)
-		client := strings.ToLower(c.Query("client", "foreground"))
+		client := strings.ToLower(strings.TrimSpace(c.Query("client", "foreground")))
+		if client != "background" {
+			client = "foreground"
+		}
 		drainOffline := client != "background"
 
 		ctx := context.Background()
@@ -67,11 +122,17 @@ func (h *ChatHandler) Connect() fiber.Handler {
 		}, func() {
 			c.Close()
 		}, service.WithOfflineDrain(drainOffline), service.WithConnectionClient(client))
+		if client == "foreground" {
+			h.cancelForegroundDisconnect(userID)
+		}
 		logger.Info("websocket connected", slog.Any("user_id", userID), slog.String("connection_id", connectionID), slog.String("client", client), slog.Bool("drain_offline", drainOffline))
 
 		defer func() {
 			h.chatService.UnregisterConnection(userID, connectionID)
 			logger.Info("websocket disconnected", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
+			if client == "foreground" && !h.chatService.HasConnectionClient(userID, "foreground") {
+				h.scheduleForegroundDisconnect(userID)
+			}
 		}()
 
 		for {
