@@ -11,6 +11,13 @@ import (
 type E2EEKeyRepository interface {
 	Upsert(ctx context.Context, key *model.E2EEUserPublicKey) error
 	GetByUserID(ctx context.Context, userID uint) (*model.E2EEUserPublicKey, error)
+	DeleteByUserID(ctx context.Context, userID uint) error
+}
+
+func (r *e2eeKeyRepository) DeleteByUserID(ctx context.Context, userID uint) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Delete(&model.E2EEUserPublicKey{}).Error
 }
 
 type e2eeKeyRepository struct {

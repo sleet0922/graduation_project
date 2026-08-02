@@ -48,6 +48,16 @@ func (r *fakeE2EEKeyRepo) GetByUserID(ctx context.Context, userID uint) (*model.
 	return &copied, nil
 }
 
+func (r *fakeE2EEKeyRepo) DeleteByUserID(ctx context.Context, userID uint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err != nil {
+		return r.err
+	}
+	delete(r.keys, userID)
+	return nil
+}
+
 type fakeE2EEGroupKeyRepo struct {
 	mu       sync.Mutex
 	versions map[uint]int
@@ -179,6 +189,16 @@ func TestE2EEServicePublishUserPublicKey(t *testing.T) {
 	if key.KeyType != "x25519" || key.PublicKey != validKey {
 		t.Fatalf("published key = %#v, want normalized x25519 and trimmed public key", key)
 	}
+	urlSafeBytes := make([]byte, 32)
+	urlSafeBytes[0] = 0xff
+	urlSafeKey := base64.RawURLEncoding.EncodeToString(urlSafeBytes)
+	key, err = svc.PublishUserPublicKey(ctx, 1, "x25519", urlSafeKey)
+	if err != nil {
+		t.Fatalf("URL-safe public key publish failed: %v", err)
+	}
+	if key.PublicKey != base64.StdEncoding.EncodeToString(urlSafeBytes) {
+		t.Fatalf("stored URL-safe public key = %q, want canonical standard Base64", key.PublicKey)
+	}
 
 	if _, err := svc.PublishUserPublicKey(ctx, 1, "ed25519", validKey); !errors.Is(err, ErrUnsupportedE2EEKeyType) {
 		t.Fatalf("bad key type error = %v, want ErrUnsupportedE2EEKeyType", err)
@@ -193,10 +213,24 @@ func TestE2EEServiceIdentityKeyChangeRotatesUserGroups(t *testing.T) {
 	keyRepo := newFakeE2EEKeyRepo()
 	groupRepo := newFakeGroupRepo()
 	groupRepo.groups[10] = &model.ChatGroup{ID: 10, OwnerID: 1}
-	groupRepo.members[10] = map[uint]*model.ChatGroupMember{1: {GroupID: 10, UserID: 1}}
+	groupRepo.members[10] = map[uint]*model.ChatGroupMember{
+		1: {GroupID: 10, UserID: 1},
+		2: {GroupID: 10, UserID: 2},
+	}
 	groupKeyRepo := newFakeE2EEGroupKeyRepo()
 	groupKeyRepo.versions[10] = 1
-	svc := NewE2EEService(keyRepo, groupRepo, groupKeyRepo, newFakeFriendRepo(), nil)
+	chat := NewChatService(newFakeFriendRepo(), groupRepo)
+	events := map[uint][]map[string]any{}
+	for _, userID := range []uint{1, 2} {
+		id := userID
+		chat.RegisterConnection(ctx, id, nil, func(payload any) error {
+			if event, ok := payload.(map[string]any); ok {
+				events[id] = append(events[id], event)
+			}
+			return nil
+		}, nil)
+	}
+	svc := NewE2EEService(keyRepo, groupRepo, groupKeyRepo, newFakeFriendRepo(), chat)
 	firstKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	secondKeyBytes := make([]byte, 32)
 	secondKeyBytes[0] = 1
@@ -205,11 +239,49 @@ func TestE2EEServiceIdentityKeyChangeRotatesUserGroups(t *testing.T) {
 	if _, err := svc.PublishUserPublicKey(ctx, 1, "x25519", firstKey); err != nil {
 		t.Fatalf("first key publish failed: %v", err)
 	}
+	if version, _ := groupKeyRepo.GetCurrentVersion(ctx, 10); version != 2 {
+		t.Fatalf("current group key version = %d, want 2 after initial key publication", version)
+	}
 	if _, err := svc.PublishUserPublicKey(ctx, 1, "x25519", secondKey); err != nil {
 		t.Fatalf("replacement key publish failed: %v", err)
 	}
-	if version, _ := groupKeyRepo.GetCurrentVersion(ctx, 10); version != 2 {
-		t.Fatalf("current group key version = %d, want 2 after identity key change", version)
+	if version, _ := groupKeyRepo.GetCurrentVersion(ctx, 10); version != 3 {
+		t.Fatalf("current group key version = %d, want 3 after identity key change", version)
+	}
+	for _, userID := range []uint{1, 2} {
+		if len(events[userID]) != 2 ||
+			events[userID][0]["key_version"] != 2 ||
+			events[userID][1]["key_version"] != 3 {
+			t.Fatalf("user %d group key events = %#v, want versions 2 and 3", userID, events[userID])
+		}
+	}
+}
+
+func TestE2EEServiceIdentityPublicationRestoresPublicKeyWhenRotationFails(t *testing.T) {
+	ctx := context.Background()
+	keyRepo := newFakeE2EEKeyRepo()
+	groupRepo := newFakeGroupRepo()
+	groupRepo.groups[10] = &model.ChatGroup{ID: 10, OwnerID: 1}
+	groupRepo.members[10] = map[uint]*model.ChatGroupMember{1: {GroupID: 10, UserID: 1}}
+	groupKeyRepo := newFakeE2EEGroupKeyRepo()
+	groupKeyRepo.versions[10] = 1
+	rotationErr := errors.New("rotation failed")
+
+	oldKeyBytes := make([]byte, 32)
+	oldKey := base64.StdEncoding.EncodeToString(oldKeyBytes)
+	newKeyBytes := make([]byte, 32)
+	newKeyBytes[0] = 1
+	newKey := base64.StdEncoding.EncodeToString(newKeyBytes)
+	keyRepo.keys[1] = &model.E2EEUserPublicKey{UserID: 1, KeyType: "x25519", PublicKey: oldKey}
+	groupKeyRepo.err = rotationErr
+	svc := NewE2EEService(keyRepo, groupRepo, groupKeyRepo, newFakeFriendRepo(), nil)
+
+	if _, err := svc.PublishUserPublicKey(ctx, 1, "x25519", newKey); !errors.Is(err, rotationErr) {
+		t.Fatalf("publish rotation error = %v", err)
+	}
+	restored, err := keyRepo.GetByUserID(ctx, 1)
+	if err != nil || restored.PublicKey != oldKey {
+		t.Fatalf("restored public key = %#v error %v, want old key", restored, err)
 	}
 }
 

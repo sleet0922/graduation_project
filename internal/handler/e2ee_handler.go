@@ -10,6 +10,7 @@ import (
 	"sleet0922/graduation_project/pkg/logger"
 	"sleet0922/graduation_project/pkg/response"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -80,10 +81,17 @@ func (h *E2EEHandler) handleGroupKeyError(c *fiber.Ctx, err error) error {
 }
 
 func decodedLenBase64URLOrStd(raw string) (int, string) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, "empty"
 	}
 	if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
+		return len(decoded), ""
+	}
+	if decoded, err := base64.URLEncoding.DecodeString(raw); err == nil {
+		return len(decoded), ""
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(raw); err == nil {
 		return len(decoded), ""
 	}
 	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {

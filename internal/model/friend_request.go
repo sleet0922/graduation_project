@@ -4,9 +4,10 @@ import "gorm.io/gorm"
 
 type FriendRequest struct {
 	gorm.Model
-	SenderID   uint `gorm:"uniqueIndex:idx_sender_receiver" json:"sender_id"`
-	ReceiverID uint `gorm:"uniqueIndex:idx_sender_receiver" json:"receiver_id"`
-	Status     uint `gorm:"default:0" json:"status"` //接受变1,拒绝变2
+	SenderID   uint  `gorm:"uniqueIndex:idx_sender_receiver" json:"sender_id"`
+	ReceiverID uint  `gorm:"uniqueIndex:idx_sender_receiver" json:"receiver_id"`
+	Status     uint  `gorm:"default:0" json:"status"` //接受变1,拒绝变2
+	Sender     *User `gorm:"-" json:"sender,omitempty"`
 }
 
 func (FriendRequest) TableName() string {

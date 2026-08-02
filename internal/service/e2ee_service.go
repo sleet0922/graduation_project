@@ -68,10 +68,17 @@ func NewE2EEService(keyRepo repo.E2EEKeyRepository, groupRepo repo.GroupReposito
 // ----------E2EE工具函数----------
 // 解码Base64
 func decodeBase64URLOrStd(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, fmt.Errorf("empty base64 input")
 	}
 	if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.URLEncoding.DecodeString(raw); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(raw); err == nil {
 		return decoded, nil
 	}
 	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
@@ -107,15 +114,20 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 		return nil, ErrUnsupportedE2EEKeyType
 	}
 	normalizedPublicKey := strings.TrimSpace(publicKey)
-	decoded, err := base64.StdEncoding.DecodeString(normalizedPublicKey)
+	decoded, err := decodeBase64URLOrStd(normalizedPublicKey)
 	if err != nil || len(decoded) != 32 {
 		return nil, ErrInvalidE2EEPublicKey
 	}
+	normalizedPublicKey = base64.StdEncoding.EncodeToString(decoded)
+	unlockIdentityState := lockE2EEIdentityWrite()
+	defer unlockIdentityState()
 
 	var oldPublicKey string
 	oldKey, err := s.keyRepo.GetByUserID(ctx, userID)
 	if err == nil && oldKey != nil {
 		oldPublicKey = oldKey.PublicKey
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	record := &model.E2EEUserPublicKey{
@@ -127,21 +139,62 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 		return nil, err
 	}
 
-	if oldPublicKey != "" && oldPublicKey != normalizedPublicKey {
+	keyChanged := oldPublicKey != normalizedPublicKey
+	if keyChanged {
 		groups, err := s.groupRepo.GetGroupsByUserID(ctx, userID)
 		if err != nil {
-			logger.Error("failed to get groups after e2ee identity key change", "user_id", userID, "error", err)
-		} else {
-			for _, group := range groups {
-				if _, err := s.groupKeyRepo.CreateNextVersion(ctx, group.ID, userID); err != nil {
-					logger.Error("failed to rotate group key after e2ee identity key change", "user_id", userID, "group_id", group.ID, "error", err)
-				}
+			_ = s.restoreUserPublicKey(ctx, userID, oldKey)
+			return nil, err
+		}
+		rotatedVersions := make(map[uint]int, len(groups))
+		for _, group := range groups {
+			unlockGroupState := lockE2EEGroupState(group.ID)
+			rotated, rotateErr := s.groupKeyRepo.CreateNextVersion(ctx, group.ID, userID)
+			unlockGroupState()
+			if rotateErr != nil {
+				_ = s.restoreUserPublicKey(ctx, userID, oldKey)
+				return nil, fmt.Errorf("rotate group %d after identity change: %w", group.ID, rotateErr)
 			}
+			rotatedVersions[group.ID] = rotated.KeyVersion
+		}
+		for groupID, version := range rotatedVersions {
+			s.notifyGroupKeyChanged(ctx, groupID, version)
 		}
 		go s.notifyFriendsKeyChanged(userID)
 	}
 
 	return s.keyRepo.GetByUserID(ctx, userID)
+}
+
+func (s *e2eeService) restoreUserPublicKey(ctx context.Context, userID uint, oldKey *model.E2EEUserPublicKey) error {
+	if oldKey == nil {
+		return s.keyRepo.DeleteByUserID(ctx, userID)
+	}
+	restored := *oldKey
+	return s.keyRepo.Upsert(ctx, &restored)
+}
+
+func (s *e2eeService) notifyGroupKeyChanged(ctx context.Context, groupID uint, keyVersion int) {
+	if s.chatService == nil {
+		return
+	}
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+	if err != nil {
+		logger.Error("failed to list members for e2ee group key notification", "group_id", groupID, "key_version", keyVersion, "error", err)
+		return
+	}
+	userIDs := make([]uint, 0, len(members))
+	for _, member := range members {
+		userIDs = append(userIDs, member.UserID)
+	}
+	if len(userIDs) == 0 {
+		return
+	}
+	s.chatService.PushSystemEvent(ctx, userIDs, map[string]any{
+		"type":        "e2ee_group_key_changed",
+		"group_id":    groupID,
+		"key_version": keyVersion,
+	})
 }
 
 func (s *e2eeService) notifyFriendsKeyChanged(userID uint) {
@@ -150,6 +203,9 @@ func (s *e2eeService) notifyFriendsKeyChanged(userID uint) {
 			logger.Error("notifyFriendsKeyChanged panic recovered", "user_id", userID, "panic", r)
 		}
 	}()
+	if s.friendRepo == nil || s.chatService == nil {
+		return
+	}
 	ctx := context.Background()
 	friends, err := s.friendRepo.GetByUserID(ctx, userID)
 	if err != nil {
@@ -171,6 +227,8 @@ func (s *e2eeService) notifyFriendsKeyChanged(userID uint) {
 
 // 获取用户的公钥
 func (s *e2eeService) GetUserPublicKey(ctx context.Context, userID uint) (*model.E2EEUserPublicKey, error) {
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
 	key, err := s.keyRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -183,6 +241,10 @@ func (s *e2eeService) GetUserPublicKey(ctx context.Context, userID uint) (*model
 
 // 获取群聊当前版本的密钥盒
 func (s *e2eeService) GetGroupCurrentKeyBox(ctx context.Context, currentUserID, groupID uint) (*model.E2EEGroupKeyBox, error) {
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
 	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return nil, ErrE2EEGroupPermission
 	}
@@ -208,6 +270,7 @@ func (s *e2eeService) GetGroupCurrentKeyBox(ctx context.Context, currentUserID, 
 		if err != nil {
 			return nil, err
 		}
+		s.notifyGroupKeyChanged(ctx, groupID, currentVersion)
 		box, err = s.groupKeyRepo.GetUserKeyBoxByVersion(ctx, groupID, currentVersion, currentUserID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrE2EEGroupKeyBoxMissing
@@ -221,6 +284,8 @@ func (s *e2eeService) GetGroupCurrentKeyBox(ctx context.Context, currentUserID, 
 
 // 获取群聊指定版本的密钥盒
 func (s *e2eeService) GetGroupKeyBoxByVersion(ctx context.Context, currentUserID, groupID uint, keyVersion int) (*model.E2EEGroupKeyBox, error) {
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
 	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return nil, ErrE2EEGroupPermission
 	}
@@ -263,6 +328,10 @@ func (s *e2eeService) RotateGroupKeyIfCurrent(ctx context.Context, currentUserID
 	if expectedVersion <= 0 {
 		return 0, ErrE2EEGroupBoxesInvalid
 	}
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
 	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return 0, ErrE2EEGroupPermission
 	}
@@ -270,11 +339,18 @@ func (s *e2eeService) RotateGroupKeyIfCurrent(ctx context.Context, currentUserID
 	if err != nil {
 		return 0, err
 	}
+	if key.KeyVersion > expectedVersion {
+		s.notifyGroupKeyChanged(ctx, groupID, key.KeyVersion)
+	}
 	return key.KeyVersion, nil
 }
 
 // 发布群聊密钥盒
 func (s *e2eeService) PublishGroupKeyBoxes(ctx context.Context, currentUserID, groupID uint, keyVersion int, boxes []GroupKeyBoxUpload, keyWrapAlg string) error {
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
 	if !s.groupRepo.IsMember(ctx, groupID, currentUserID) {
 		return ErrE2EEGroupPermission
 	}

@@ -26,21 +26,23 @@ type ChatHandler struct {
 const defaultForegroundDisconnectGrace = 3 * time.Second
 
 type chatIncomingMessage struct {
-	Type        string `json:"type"`
-	ToUserID    uint   `json:"to_user_id"`
-	GroupID     uint   `json:"group_id"`
-	MessageType string `json:"message_type"`
-	Content     string `json:"content"`
-	MessageID   string `json:"message_id"` // recall 使用
+	Type            string `json:"type"`
+	ToUserID        uint   `json:"to_user_id"`
+	GroupID         uint   `json:"group_id"`
+	MessageType     string `json:"message_type"`
+	Content         string `json:"content"`
+	MessageID       string `json:"message_id"` // recall 使用
+	ClientMessageID string `json:"client_message_id"`
 }
 
 type chatOutgoingMessage struct {
-	Type    string             `json:"type"`
-	UserID  uint               `json:"user_id,omitempty"`
-	GroupID uint               `json:"group_id,omitempty"`
-	Message *model.ChatMessage `json:"message,omitempty"`
-	Offline bool               `json:"offline,omitempty"`
-	Error   string             `json:"error,omitempty"`
+	Type            string             `json:"type"`
+	UserID          uint               `json:"user_id,omitempty"`
+	GroupID         uint               `json:"group_id,omitempty"`
+	Message         *model.ChatMessage `json:"message,omitempty"`
+	Offline         bool               `json:"offline,omitempty"`
+	Error           string             `json:"error,omitempty"`
+	ClientMessageID string             `json:"client_message_id,omitempty"`
 }
 
 func NewChatHandler(chatService service.ChatService, rtcService service.RTCService) *ChatHandler {
@@ -102,7 +104,13 @@ func (h *ChatHandler) Connect() fiber.Handler {
 		drainOffline := client != "background"
 
 		ctx := context.Background()
-		if err := c.WriteJSON(chatOutgoingMessage{
+		var writeMu sync.Mutex
+		writeJSON := func(payload any) error {
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			return c.WriteJSON(payload)
+		}
+		if err := writeJSON(chatOutgoingMessage{
 			Type:   "connected",
 			UserID: userID,
 		}); err != nil {
@@ -116,9 +124,9 @@ func (h *ChatHandler) Connect() fiber.Handler {
 				Message: message,
 				Offline: offline,
 			}
-			return c.WriteJSON(payload)
+			return writeJSON(payload)
 		}, func(payload any) error {
-			return c.WriteJSON(payload)
+			return writeJSON(payload)
 		}, func() {
 			c.Close()
 		}, service.WithOfflineDrain(drainOffline), service.WithConnectionClient(client))
@@ -144,7 +152,7 @@ func (h *ChatHandler) Connect() fiber.Handler {
 			if incoming.Type != "chat" {
 				switch incoming.Type {
 				case "ping":
-					if err := c.WriteJSON(chatOutgoingMessage{Type: "pong"}); err != nil {
+					if err := writeJSON(chatOutgoingMessage{Type: "pong"}); err != nil {
 						return
 					}
 				case "mark_read":
@@ -154,7 +162,7 @@ func (h *ChatHandler) Connect() fiber.Handler {
 					// 撤回消息：recall { to_user_id | group_id, message_id }
 					if err := h.chatService.RecallMessage(ctx, userID, incoming.ToUserID, incoming.GroupID, incoming.MessageID); err != nil {
 						logger.Warn("recall message failed", slog.Any("user_id", userID), slog.Any("error", err))
-						if writeErr := c.WriteJSON(chatOutgoingMessage{
+						if writeErr := writeJSON(chatOutgoingMessage{
 							Type:  "error",
 							Error: err.Error(),
 						}); writeErr != nil {
@@ -163,7 +171,7 @@ func (h *ChatHandler) Connect() fiber.Handler {
 					}
 				default:
 					logger.Warn("unsupported message type", slog.Any("user_id", userID), slog.String("type", incoming.Type))
-					if err := c.WriteJSON(chatOutgoingMessage{
+					if err := writeJSON(chatOutgoingMessage{
 						Type:  "error",
 						Error: "不支持的消息类型",
 					}); err != nil {
@@ -175,9 +183,10 @@ func (h *ChatHandler) Connect() fiber.Handler {
 
 			if incoming.ToUserID == 0 && incoming.GroupID == 0 {
 				logger.Warn("empty receiver", slog.Any("user_id", userID))
-				if err := c.WriteJSON(chatOutgoingMessage{
-					Type:  "error",
-					Error: "接收方或群聊不能为空",
+				if err := writeJSON(chatOutgoingMessage{
+					Type:            "error",
+					Error:           "接收方或群聊不能为空",
+					ClientMessageID: incoming.ClientMessageID,
 				}); err != nil {
 					return
 				}
@@ -187,17 +196,19 @@ func (h *ChatHandler) Connect() fiber.Handler {
 			message, err := h.chatService.SendMessage(ctx, userID, incoming.ToUserID, incoming.GroupID, incoming.MessageType, incoming.Content)
 			if err != nil {
 				logger.Warn("send message failed", slog.Any("user_id", userID), slog.Any("to_user_id", incoming.ToUserID), slog.Any("group_id", incoming.GroupID), slog.Any("error", err))
-				if writeErr := c.WriteJSON(chatOutgoingMessage{
-					Type:  "error",
-					Error: err.Error(),
+				if writeErr := writeJSON(chatOutgoingMessage{
+					Type:            "error",
+					Error:           err.Error(),
+					ClientMessageID: incoming.ClientMessageID,
 				}); writeErr != nil {
 					return
 				}
 				continue
 			}
-			if err := c.WriteJSON(chatOutgoingMessage{
-				Type:    "sent",
-				Message: message,
+			if err := writeJSON(chatOutgoingMessage{
+				Type:            "sent",
+				Message:         message,
+				ClientMessageID: incoming.ClientMessageID,
 			}); err != nil {
 				return
 			}

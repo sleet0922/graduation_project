@@ -36,7 +36,11 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 
 	userService := service.NewUserService(userRepo)
 	// chatService 需先初始化，friendService 依赖它推送好友申请通知
-	chatService := service.NewChatService(friendRepo, groupRepo)
+	chatService := service.NewChatService(
+		friendRepo,
+		groupRepo,
+		service.WithE2EEMessageValidation(e2eeKeyRepo, e2eeGroupKeyRepo),
+	)
 	friendService := service.NewFriendService(friendRepo, userRepo, chatService)
 	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo, friendRepo, chatService)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)

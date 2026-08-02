@@ -83,6 +83,30 @@ func TestFriendServiceSendFriendRequestByAccount(t *testing.T) {
 	}
 }
 
+func TestFriendServiceGetFriendRequestsIncludesSender(t *testing.T) {
+	ctx := context.Background()
+	friendRepo := newFakeFriendRepo()
+	friendRepo.requests[1] = &model.FriendRequest{
+		Model:      gorm.Model{ID: 1},
+		SenderID:   1,
+		ReceiverID: 2,
+		Status:     0,
+	}
+	userRepo := newFakeUserRepo(testUser(1, "sender", "sender@example.com"))
+	svc := NewFriendService(friendRepo, userRepo, nil)
+
+	requests, err := svc.GetFriendRequestsByUserID(ctx, 2)
+	if err != nil {
+		t.Fatalf("GetFriendRequestsByUserID failed: %v", err)
+	}
+	if len(requests) != 1 || requests[0].Sender == nil {
+		t.Fatalf("requests = %#v, want one request with sender", requests)
+	}
+	if requests[0].Sender.ID != 1 || requests[0].Sender.Account != "sender" {
+		t.Fatalf("sender = %#v, want sender account", requests[0].Sender)
+	}
+}
+
 func TestFriendServiceHandleFriendRequest(t *testing.T) {
 	ctx := context.Background()
 

@@ -2,11 +2,33 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"sleet0922/graduation_project/internal/service"
 )
+
+func TestChatMessageCorrelationJSON(t *testing.T) {
+	var incoming chatIncomingMessage
+	if err := json.Unmarshal([]byte(`{"type":"chat","client_message_id":"opt-1"}`), &incoming); err != nil {
+		t.Fatalf("unmarshal incoming chat message: %v", err)
+	}
+	if incoming.ClientMessageID != "opt-1" {
+		t.Fatalf("incoming client_message_id = %q", incoming.ClientMessageID)
+	}
+	encoded, err := json.Marshal(chatOutgoingMessage{Type: "sent", ClientMessageID: incoming.ClientMessageID})
+	if err != nil {
+		t.Fatalf("marshal outgoing chat message: %v", err)
+	}
+	var outgoing map[string]any
+	if err := json.Unmarshal(encoded, &outgoing); err != nil {
+		t.Fatalf("decode outgoing chat message: %v", err)
+	}
+	if outgoing["client_message_id"] != "opt-1" {
+		t.Fatalf("outgoing payload = %#v", outgoing)
+	}
+}
 
 func TestChatHandlerForegroundDisconnectGrace(t *testing.T) {
 	chat := service.NewChatService(nil, nil)

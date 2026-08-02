@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,14 +18,35 @@ import (
 )
 
 var (
-	ErrMessageEmpty           = errors.New("消息内容不能为空")
-	ErrMessagePermission      = errors.New("只能给好友发送消息")
-	ErrGroupMessagePermission = errors.New("群聊已解散")
-	ErrRecallExpired          = errors.New("消息只能在发出后1分钟内撤回")
-	ErrRecallPermission       = errors.New("只能撤回自己发送的消息")
+	ErrMessageEmpty            = errors.New("消息内容不能为空")
+	ErrMessagePermission       = errors.New("只能给好友发送消息")
+	ErrGroupMessagePermission  = errors.New("群聊已解散")
+	ErrRecallExpired           = errors.New("消息只能在发出后1分钟内撤回")
+	ErrRecallPermission        = errors.New("只能撤回自己发送的消息")
+	ErrE2EEMessageMalformed    = errors.New("端到端加密消息格式无效")
+	ErrE2EESenderKeyStale      = errors.New("发送方身份密钥已更新，请同步密钥后重试")
+	ErrE2EERecipientKeyStale   = errors.New("接收方身份密钥已更新，请重新加密后重试")
+	ErrE2EEGroupKeyStale       = errors.New("群聊密钥版本已更新，请重新加密后重试")
+	ErrE2EEGroupKeyNotReady    = errors.New("群聊当前密钥尚未完成全员分发，请稍后重试")
+	ErrE2EEKeyStateUnavailable = errors.New("暂时无法确认服务端当前密钥状态")
 )
 
 const messageRecallWindow = time.Minute
+
+const chatPushKeyPrefix = "chat:push:v2:"
+
+type chatEnvelopeMetadata struct {
+	E2EE           int    `json:"e2ee"`
+	Version        string `json:"v"`
+	Scope          string `json:"scope"`
+	GroupID        uint   `json:"group_id"`
+	KeyID          string `json:"key_id"`
+	KeyVersion     int    `json:"key_version"`
+	SenderKeyID    string `json:"sender_key_id"`
+	RecipientKeyID string `json:"recipient_key_id"`
+	Nonce          string `json:"nonce"`
+	CipherText     string `json:"ct"`
+}
 
 type DeliveryFunc func(message *model.ChatMessage, offline bool) error
 
@@ -103,6 +126,8 @@ func normalizeConnectionClient(client string) string {
 type chatService struct {
 	friendRepo     repo.FriendRepository
 	groupRepo      repo.GroupRepository
+	e2eeKeyRepo    repo.E2EEKeyRepository
+	e2eeGroupRepo  repo.E2EEGroupKeyRepository
 	mu             sync.RWMutex
 	sequence       uint64
 	connections    map[uint]map[string]*chatConnection
@@ -111,8 +136,17 @@ type chatService struct {
 	recentMessages map[string]recentChatMessage
 }
 
-func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupRepository) ChatService {
-	return &chatService{
+type ChatServiceOption func(*chatService)
+
+func WithE2EEMessageValidation(keyRepo repo.E2EEKeyRepository, groupKeyRepo repo.E2EEGroupKeyRepository) ChatServiceOption {
+	return func(service *chatService) {
+		service.e2eeKeyRepo = keyRepo
+		service.e2eeGroupRepo = groupKeyRepo
+	}
+}
+
+func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupRepository, options ...ChatServiceOption) ChatService {
+	service := &chatService{
 		friendRepo:     friendRepo,
 		groupRepo:      groupRepo,
 		connections:    make(map[uint]map[string]*chatConnection),
@@ -120,6 +154,134 @@ func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupReposi
 		systemOffline:  make(map[uint][]*queuedSystemEvent),
 		recentMessages: make(map[string]recentChatMessage),
 	}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
+}
+
+func e2eePublicKeyID(publicKey string) (string, error) {
+	decoded, err := decodeBase64URLOrStd(strings.TrimSpace(publicKey))
+	if err != nil || len(decoded) != 32 {
+		return "", ErrE2EEMessageMalformed
+	}
+	digest := sha256.Sum256(decoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func validE2EEHexID(value string, byteLength int) bool {
+	if len(value) != byteLength*2 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func validateE2EEEnvelopeEncoding(metadata chatEnvelopeMetadata) error {
+	nonce, nonceErr := decodeBase64URLOrStd(strings.TrimSpace(metadata.Nonce))
+	cipherText, cipherTextErr := decodeBase64URLOrStd(strings.TrimSpace(metadata.CipherText))
+	if nonceErr != nil || len(nonce) != 12 || cipherTextErr != nil || len(cipherText) <= 16 {
+		return ErrE2EEMessageMalformed
+	}
+	if !validE2EEHexID(metadata.SenderKeyID, 32) {
+		return ErrE2EEMessageMalformed
+	}
+	return nil
+}
+
+func (s *chatService) currentE2EEPublicKeyID(ctx context.Context, userID uint) (string, error) {
+	key, err := s.e2eeKeyRepo.GetByUserID(ctx, userID)
+	if err != nil || key == nil {
+		return "", ErrE2EEKeyStateUnavailable
+	}
+	keyID, err := e2eePublicKeyID(key.PublicKey)
+	if err != nil {
+		return "", ErrE2EEKeyStateUnavailable
+	}
+	return keyID, nil
+}
+
+func (s *chatService) validateE2EEMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageType, content string) error {
+	if s.e2eeKeyRepo == nil && s.e2eeGroupRepo == nil {
+		return nil
+	}
+	if messageType == "call" || messageType == "video" {
+		return nil
+	}
+	var metadata chatEnvelopeMetadata
+	if err := json.Unmarshal([]byte(content), &metadata); err != nil || metadata.E2EE != 1 {
+		return ErrE2EEMessageMalformed
+	}
+	if s.e2eeKeyRepo == nil || s.e2eeGroupRepo == nil ||
+		strings.TrimSpace(metadata.Nonce) == "" || strings.TrimSpace(metadata.CipherText) == "" {
+		return ErrE2EEMessageMalformed
+	}
+	if err := validateE2EEEnvelopeEncoding(metadata); err != nil {
+		return err
+	}
+
+	senderKeyID, err := s.currentE2EEPublicKeyID(ctx, fromUserID)
+	if err != nil {
+		return err
+	}
+	if metadata.SenderKeyID != senderKeyID {
+		return ErrE2EESenderKeyStale
+	}
+
+	if groupID > 0 {
+		if metadata.Version != "group+chacha20poly1305:v1" ||
+			metadata.Scope != "group" || metadata.GroupID != groupID ||
+			metadata.KeyVersion <= 0 {
+			return ErrE2EEMessageMalformed
+		}
+		currentVersion, versionErr := s.e2eeGroupRepo.GetCurrentVersion(ctx, groupID)
+		if versionErr != nil {
+			return ErrE2EEKeyStateUnavailable
+		}
+		if metadata.KeyVersion != currentVersion {
+			return ErrE2EEGroupKeyStale
+		}
+		members, membersErr := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+		if membersErr != nil {
+			return ErrE2EEKeyStateUnavailable
+		}
+		boxes, boxesErr := s.e2eeGroupRepo.GetVersionBoxes(ctx, groupID, currentVersion)
+		if boxesErr != nil || len(boxes) != len(members) {
+			return ErrE2EEGroupKeyNotReady
+		}
+		memberIDs := make(map[uint]struct{}, len(members))
+		for _, member := range members {
+			memberIDs[member.UserID] = struct{}{}
+		}
+		seenBoxUsers := make(map[uint]struct{}, len(boxes))
+		for _, box := range boxes {
+			if _, isMember := memberIDs[box.UserID]; !isMember || !isSupportedKeyBox(box) {
+				return ErrE2EEGroupKeyNotReady
+			}
+			if _, duplicate := seenBoxUsers[box.UserID]; duplicate {
+				return ErrE2EEGroupKeyNotReady
+			}
+			seenBoxUsers[box.UserID] = struct{}{}
+		}
+		return nil
+	}
+
+	if metadata.Version != "x25519+chacha20poly1305:v1" ||
+		metadata.Scope != "" || metadata.GroupID != 0 ||
+		!validE2EEHexID(metadata.KeyID, 8) ||
+		!validE2EEHexID(metadata.RecipientKeyID, 32) {
+		return ErrE2EEMessageMalformed
+	}
+	recipientKeyID, err := s.currentE2EEPublicKeyID(ctx, toUserID)
+	if err != nil {
+		return err
+	}
+	if metadata.RecipientKeyID != recipientKeyID {
+		return ErrE2EERecipientKeyStale
+	}
+	return nil
 }
 
 func (s *chatService) trackRecentMessage(message *model.ChatMessage) {
@@ -191,18 +353,70 @@ func clonePayload(payload any) (any, error) {
 }
 
 // 推送到redis
-func (s *chatService) pushRedisMessage(ctx context.Context, userID uint, message *model.ChatMessage) {
+func inspectChatEnvelope(content string) chatEnvelopeMetadata {
+	var metadata chatEnvelopeMetadata
+	if err := json.Unmarshal([]byte(content), &metadata); err != nil || metadata.E2EE != 1 {
+		return chatEnvelopeMetadata{}
+	}
+	metadata.Version = strings.TrimSpace(metadata.Version)
+	metadata.KeyID = strings.TrimSpace(metadata.KeyID)
+	if len(metadata.Version) > 64 {
+		metadata.Version = metadata.Version[:64]
+	}
+	if len(metadata.KeyID) > 64 {
+		metadata.KeyID = metadata.KeyID[:64]
+	}
+	return metadata
+}
+
+func chatMessageLogArgs(message *model.ChatMessage, recipientUserID uint, source, result string) []any {
+	metadata := inspectChatEnvelope(message.Content)
+	args := []any{
+		"message_id", message.ID,
+		"from_user_id", message.FromUserID,
+		"to_user_id", message.ToUserID,
+		"recipient_user_id", recipientUserID,
+		"group_id", message.GroupID,
+		"message_type", message.MessageType,
+		"created_at", message.CreatedAt.UTC().Format(time.RFC3339Nano),
+		"delivery_source", source,
+		"delivery_result", result,
+		"e2ee", metadata.E2EE == 1,
+	}
+	if metadata.Version != "" {
+		args = append(args, "e2ee_version", metadata.Version)
+	}
+	if metadata.KeyID != "" {
+		args = append(args, "key_id", metadata.KeyID)
+	}
+	if metadata.KeyVersion > 0 {
+		args = append(args, "key_version", metadata.KeyVersion)
+	}
+	return args
+}
+
+func logChatMessageDelivery(message *model.ChatMessage, recipientUserID uint, source, result string) {
+	logger.Info("chat message delivery", chatMessageLogArgs(message, recipientUserID, source, result)...)
+}
+
+func chatPushKey(userID uint) string {
+	return fmt.Sprintf("%s%d", chatPushKeyPrefix, userID)
+}
+
+func (s *chatService) pushRedisMessage(ctx context.Context, userID uint, message *model.ChatMessage) error {
 	if redis.RedisClient == nil {
-		return
+		return nil
 	}
 
 	msgBytes, err := json.Marshal(message)
 	if err != nil {
-		return
+		return err
 	}
-	pushKey := fmt.Sprintf("chat:push:%d", userID)
-	redis.RedisClient.RPush(ctx, pushKey, msgBytes)
-	redis.RedisClient.Expire(ctx, pushKey, 3*24*time.Hour)
+	pushKey := chatPushKey(userID)
+	if err := redis.RedisClient.RPush(ctx, pushKey, msgBytes).Err(); err != nil {
+		return err
+	}
+	return redis.RedisClient.Expire(ctx, pushKey, 3*24*time.Hour).Err()
 }
 
 // 从redis拉取消息
@@ -210,28 +424,28 @@ func (s *chatService) drainRedisMessages(ctx context.Context, userID uint, deliv
 	if redis.RedisClient == nil {
 		return
 	}
-	pushKey := fmt.Sprintf("chat:push:%d", userID)
+	pushKey := chatPushKey(userID)
 	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
 	if err != nil || len(rawList) == 0 {
 		return
 	}
-	anyDelivered := false
 	for _, raw := range rawList {
 		var message model.ChatMessage
 		if err := json.Unmarshal([]byte(raw), &message); err != nil {
+			_ = redis.RedisClient.LRem(ctx, pushKey, 0, raw).Err()
 			continue
 		}
 		if _, alreadyDelivered := deliveredIDs[message.ID]; alreadyDelivered {
+			_ = redis.RedisClient.LRem(ctx, pushKey, 0, raw).Err()
 			continue
 		}
 		if err := deliver(&message, true); err != nil {
+			logChatMessageDelivery(&message, userID, "redis_offline", "failed")
 			continue
 		}
 		deliveredIDs[message.ID] = struct{}{}
-		anyDelivered = true
-	}
-	if anyDelivered {
-		redis.RedisClient.Del(ctx, pushKey)
+		_ = redis.RedisClient.LRem(ctx, pushKey, 0, raw).Err()
+		logChatMessageDelivery(&message, userID, "redis_offline", "delivered")
 	}
 }
 
@@ -260,7 +474,6 @@ func (s *chatService) enqueueOfflineSystemEvent(userID uint, payload any) {
 
 // 将消息投递给用户的所有连接
 func (s *chatService) deliverToUser(ctx context.Context, userID uint, message *model.ChatMessage) {
-	s.pushRedisMessage(ctx, userID, message)
 	s.mu.RLock()
 	userConnections := s.connections[userID]
 	connections := make([]*chatConnection, 0, len(userConnections))
@@ -269,7 +482,11 @@ func (s *chatService) deliverToUser(ctx context.Context, userID uint, message *m
 	}
 	s.mu.RUnlock()
 	if len(connections) == 0 {
+		if err := s.pushRedisMessage(ctx, userID, message); err != nil {
+			logger.Warn("failed to persist offline chat message", chatMessageLogArgs(message, userID, "realtime", "redis_failed")...)
+		}
 		s.enqueueOfflineMessage(userID, message)
+		logChatMessageDelivery(message, userID, "realtime", "queued_offline")
 		return
 	}
 	successCount := 0
@@ -295,17 +512,32 @@ func (s *chatService) deliverToUser(ctx context.Context, userID uint, message *m
 		s.mu.Unlock()
 	}
 	if successCount == 0 {
+		if err := s.pushRedisMessage(ctx, userID, message); err != nil {
+			logger.Warn("failed to persist offline chat message", chatMessageLogArgs(message, userID, "realtime", "redis_failed")...)
+		}
 		s.enqueueOfflineMessage(userID, message)
+		logChatMessageDelivery(message, userID, "realtime", "queued_after_failure")
+		return
 	}
+	logChatMessageDelivery(message, userID, "realtime", "delivered")
 }
 
 // 发送群消息
 func (s *chatService) sendGroupMessage(ctx context.Context, fromUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
+	unlockGroupState := lockE2EEGroupState(groupID)
 	if s.groupRepo == nil || !s.groupRepo.IsMember(ctx, groupID, fromUserID) {
+		unlockGroupState()
 		return nil, ErrGroupMessagePermission
 	}
 	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
 	if err != nil {
+		unlockGroupState()
+		return nil, err
+	}
+	if err := s.validateE2EEMessage(ctx, fromUserID, 0, groupID, messageType, content); err != nil {
+		unlockGroupState()
 		return nil, err
 	}
 	message := &model.ChatMessage{
@@ -318,6 +550,7 @@ func (s *chatService) sendGroupMessage(ctx context.Context, fromUserID, groupID 
 		CreatedAt:        time.Now(),
 	}
 	s.trackRecentMessage(message)
+	unlockGroupState()
 	for _, member := range members {
 		if member.UserID == fromUserID {
 			continue
@@ -363,6 +596,9 @@ func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliv
 		for _, message := range pending {
 			if err := deliver(message, true); err == nil {
 				delivered[message.ID] = struct{}{}
+				logChatMessageDelivery(message, userID, "memory_offline", "delivered")
+			} else {
+				logChatMessageDelivery(message, userID, "memory_offline", "failed")
 			}
 		}
 		if len(delivered) > 0 {
@@ -449,6 +685,11 @@ func (s *chatService) SendMessage(ctx context.Context, fromUserID, toUserID, gro
 	}
 	if !s.friendRepo.CheckFriendship(ctx, fromUserID, toUserID) {
 		return nil, ErrMessagePermission
+	}
+	unlockIdentityState := lockE2EEIdentityRead()
+	defer unlockIdentityState()
+	if err := s.validateE2EEMessage(ctx, fromUserID, toUserID, 0, messageType, content); err != nil {
+		return nil, err
 	}
 	message := &model.ChatMessage{
 		ID:               fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.sequence, 1)),

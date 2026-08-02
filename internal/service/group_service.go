@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"strings"
@@ -29,6 +30,35 @@ type GroupService interface {
 	DeleteGroup(ctx context.Context, operatorID, groupID uint) error
 	GetGroups(ctx context.Context, userID uint) ([]*model.ChatGroupDetail, error)
 	GetMembers(ctx context.Context, userID, groupID uint) ([]*model.ChatGroupMemberDetail, error)
+}
+
+func (s *groupService) rotateGroupKey(ctx context.Context, groupID, actorID uint) (int, error) {
+	if s.e2ee == nil {
+		return 0, nil
+	}
+	if err := s.e2ee.RotateGroupKey(ctx, groupID, actorID); err != nil {
+		return 0, err
+	}
+	return s.e2ee.GetGroupCurrentVersion(ctx, groupID)
+}
+
+func (s *groupService) notifyGroupKeyChanged(ctx context.Context, groupID uint, keyVersion int) {
+	if s.chatService == nil || keyVersion <= 0 {
+		return
+	}
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+	if err != nil || len(members) == 0 {
+		return
+	}
+	userIDs := make([]uint, 0, len(members))
+	for _, member := range members {
+		userIDs = append(userIDs, member.UserID)
+	}
+	s.chatService.PushSystemEvent(ctx, userIDs, map[string]any{
+		"type":        "e2ee_group_key_changed",
+		"group_id":    groupID,
+		"key_version": keyVersion,
+	})
 }
 
 type groupService struct {
@@ -135,11 +165,23 @@ func (s *groupService) CreateGroup(ctx context.Context, ownerID uint, name, avat
 	if err != nil {
 		return nil, err
 	}
-	if s.e2ee != nil {
-		if err := s.e2ee.RotateGroupKey(ctx, group.ID, ownerID); err != nil {
-			return nil, err
+	unlockGroupState := lockE2EEGroupState(group.ID)
+	defer unlockGroupState()
+	keyVersion, err := s.rotateGroupKey(ctx, group.ID, ownerID)
+	if err != nil {
+		if rollbackErr := s.groupRepo.DeleteGroup(ctx, group.ID); rollbackErr != nil {
+			return nil, fmt.Errorf("rotate initial group key: %w; rollback group: %v", err, rollbackErr)
 		}
+		return nil, err
 	}
+	if s.chatService != nil {
+		s.chatService.PushSystemEvent(ctx, memberIDs, map[string]any{
+			"type":        "group_member_added",
+			"group_id":    group.ID,
+			"operator_id": ownerID,
+		})
+	}
+	s.notifyGroupKeyChanged(ctx, group.ID, keyVersion)
 	return s.buildGroupDetail(ctx, group)
 }
 
@@ -155,12 +197,37 @@ func (s *groupService) AddMembers(ctx context.Context, operatorID, groupID uint,
 	if len(memberIDs) == 0 {
 		return nil, ErrGroupMembersEmpty
 	}
-	err := s.validateInvitees(ctx, operatorID, memberIDs)
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
+	if _, err := s.groupRepo.GetByID(ctx, groupID); err != nil {
+		return nil, ErrGroupNotFound
+	}
+	if !s.groupRepo.IsMember(ctx, groupID, operatorID) {
+		return nil, ErrGroupPermission
+	}
+	existingMembers, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-	members := make([]*model.ChatGroupMember, 0, len(memberIDs))
+	existingIDs := make(map[uint]struct{}, len(existingMembers))
+	for _, member := range existingMembers {
+		existingIDs[member.UserID] = struct{}{}
+	}
+	newMemberIDs := make([]uint, 0, len(memberIDs))
 	for _, memberID := range memberIDs {
+		if _, exists := existingIDs[memberID]; !exists {
+			newMemberIDs = append(newMemberIDs, memberID)
+		}
+	}
+	if len(newMemberIDs) == 0 {
+		return s.GetMembers(ctx, operatorID, groupID)
+	}
+	err = s.validateInvitees(ctx, operatorID, newMemberIDs)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]*model.ChatGroupMember, 0, len(newMemberIDs))
+	for _, memberID := range newMemberIDs {
 		members = append(members, &model.ChatGroupMember{
 			GroupID:   groupID,
 			UserID:    memberID,
@@ -172,19 +239,28 @@ func (s *groupService) AddMembers(ctx context.Context, operatorID, groupID uint,
 	if err != nil {
 		return nil, err
 	}
-	if s.e2ee != nil {
-		if err := s.e2ee.RotateGroupKey(ctx, groupID, operatorID); err != nil {
-			return nil, err
+	keyVersion, err := s.rotateGroupKey(ctx, groupID, operatorID)
+	if err != nil {
+		var rollbackErr error
+		for _, memberID := range newMemberIDs {
+			if removeErr := s.groupRepo.RemoveMember(ctx, groupID, memberID); removeErr != nil {
+				rollbackErr = errors.Join(rollbackErr, removeErr)
+			}
 		}
+		if rollbackErr != nil {
+			return nil, fmt.Errorf("rotate group key: %w; rollback members: %v", err, rollbackErr)
+		}
+		return nil, err
 	}
 	// 实时通知被拉入群的成员
-	if s.chatService != nil && len(memberIDs) > 0 {
-		s.chatService.PushSystemEvent(ctx, memberIDs, map[string]any{
+	if s.chatService != nil {
+		s.chatService.PushSystemEvent(ctx, newMemberIDs, map[string]any{
 			"type":        "group_member_added",
 			"group_id":    groupID,
 			"operator_id": operatorID,
 		})
 	}
+	s.notifyGroupKeyChanged(ctx, groupID, keyVersion)
 	return s.GetMembers(ctx, operatorID, groupID)
 }
 
@@ -200,14 +276,42 @@ func (s *groupService) RemoveMember(ctx context.Context, operatorID, groupID, me
 	if memberID == group.OwnerID {
 		return ErrGroupOwnerProtected
 	}
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
+	currentGroup, err := s.groupRepo.GetByID(ctx, groupID)
+	if err != nil {
+		return ErrGroupNotFound
+	}
+	if currentGroup.OwnerID != operatorID {
+		return ErrGroupKickDenied
+	}
 	if !s.groupRepo.IsMember(ctx, groupID, memberID) {
+		return ErrGroupMemberNotFound
+	}
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	var removedMember *model.ChatGroupMember
+	for _, member := range members {
+		if member.UserID == memberID {
+			copied := *member
+			removedMember = &copied
+			break
+		}
+	}
+	if removedMember == nil {
 		return ErrGroupMemberNotFound
 	}
 	if err := s.groupRepo.RemoveMember(ctx, groupID, memberID); err != nil {
 		return err
 	}
-	if s.e2ee != nil {
-		return s.e2ee.RotateGroupKey(ctx, groupID, operatorID)
+	keyVersion, err := s.rotateGroupKey(ctx, groupID, operatorID)
+	if err != nil {
+		if rollbackErr := s.groupRepo.AddMembers(ctx, groupID, []*model.ChatGroupMember{removedMember}); rollbackErr != nil {
+			return fmt.Errorf("rotate group key: %w; restore member: %v", err, rollbackErr)
+		}
+		return err
 	}
 	// 通知被踢出的成员
 	if s.chatService != nil {
@@ -217,6 +321,7 @@ func (s *groupService) RemoveMember(ctx context.Context, operatorID, groupID, me
 			"operator_id": operatorID,
 		})
 	}
+	s.notifyGroupKeyChanged(ctx, groupID, keyVersion)
 	return nil
 }
 
@@ -232,11 +337,35 @@ func (s *groupService) LeaveGroup(ctx context.Context, userID, groupID uint) err
 	if group.OwnerID == userID {
 		return ErrGroupLeaveDenied
 	}
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
+	if !s.groupRepo.IsMember(ctx, groupID, userID) {
+		return ErrGroupPermission
+	}
+	members, err := s.groupRepo.GetMembersByGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	var leavingMember *model.ChatGroupMember
+	for _, member := range members {
+		if member.UserID == userID {
+			copied := *member
+			leavingMember = &copied
+			break
+		}
+	}
+	if leavingMember == nil {
+		return ErrGroupMemberNotFound
+	}
 	if err := s.groupRepo.RemoveMember(ctx, groupID, userID); err != nil {
 		return err
 	}
-	if s.e2ee != nil {
-		return s.e2ee.RotateGroupKey(ctx, groupID, userID)
+	keyVersion, err := s.rotateGroupKey(ctx, groupID, userID)
+	if err != nil {
+		if rollbackErr := s.groupRepo.AddMembers(ctx, groupID, []*model.ChatGroupMember{leavingMember}); rollbackErr != nil {
+			return fmt.Errorf("rotate group key: %w; restore leaving member: %v", err, rollbackErr)
+		}
+		return err
 	}
 	// 通知群主：有人离开了群聊
 	if s.chatService != nil && group.OwnerID != userID {
@@ -246,6 +375,7 @@ func (s *groupService) LeaveGroup(ctx context.Context, userID, groupID uint) err
 			"user_id":  userID,
 		})
 	}
+	s.notifyGroupKeyChanged(ctx, groupID, keyVersion)
 	return nil
 }
 
@@ -256,6 +386,15 @@ func (s *groupService) DeleteGroup(ctx context.Context, operatorID, groupID uint
 		return ErrGroupNotFound
 	}
 	if group.OwnerID != operatorID {
+		return ErrGroupDeleteDenied
+	}
+	unlockGroupState := lockE2EEGroupState(groupID)
+	defer unlockGroupState()
+	currentGroup, err := s.groupRepo.GetByID(ctx, groupID)
+	if err != nil {
+		return ErrGroupNotFound
+	}
+	if currentGroup.OwnerID != operatorID {
 		return ErrGroupDeleteDenied
 	}
 

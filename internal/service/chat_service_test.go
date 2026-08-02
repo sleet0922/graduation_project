@@ -2,12 +2,44 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"sleet0922/graduation_project/internal/model"
+	appredis "sleet0922/graduation_project/pkg/redis"
+
+	"github.com/alicebob/miniredis/v2"
+	goredis "github.com/redis/go-redis/v9"
 )
+
+func mustTestJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal test payload: %v", err)
+	}
+	return string(encoded)
+}
+
+func useMiniRedis(t *testing.T) *miniredis.Miniredis {
+	t.Helper()
+	server, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	previousClient := appredis.RedisClient
+	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
+	appredis.RedisClient = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		server.Close()
+		appredis.RedisClient = previousClient
+	})
+	return server
+}
 
 func TestChatServiceRecallWindowAndOwnership(t *testing.T) {
 	ctx := context.Background()
@@ -146,6 +178,92 @@ func TestChatServiceOfflineQueuesAreDrainedOnRegister(t *testing.T) {
 	}
 }
 
+func TestChatServiceDoesNotQueueOrReplayLiveDelivery(t *testing.T) {
+	server := useMiniRedis(t)
+	ctx := context.Background()
+	friendRepo := newFakeFriendRepo()
+	friendRepo.friendships[[2]uint{1, 2}] = true
+	svc := NewChatService(friendRepo, newFakeGroupRepo())
+
+	deliveryCount := 0
+	connectionID := svc.RegisterConnection(ctx, 2, func(*model.ChatMessage, bool) error {
+		deliveryCount++
+		return nil
+	}, nil, nil)
+	if _, err := svc.SendMessage(ctx, 1, 2, 0, "text", "live"); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	if deliveryCount != 1 {
+		t.Fatalf("live delivery count = %d, want 1", deliveryCount)
+	}
+	if server.Exists(chatPushKey(2)) {
+		t.Fatalf("live-delivered message was persisted at %q", chatPushKey(2))
+	}
+
+	svc.UnregisterConnection(2, connectionID)
+	svc.RegisterConnection(ctx, 2, func(*model.ChatMessage, bool) error {
+		deliveryCount++
+		return nil
+	}, nil, nil)
+	if deliveryCount != 1 {
+		t.Fatalf("live message was replayed after reconnect; delivery count = %d", deliveryCount)
+	}
+}
+
+func TestChatServiceOfflineDeliveryClearsRedisCopy(t *testing.T) {
+	server := useMiniRedis(t)
+	ctx := context.Background()
+	friendRepo := newFakeFriendRepo()
+	friendRepo.friendships[[2]uint{1, 2}] = true
+	svc := NewChatService(friendRepo, newFakeGroupRepo())
+
+	message, err := svc.SendMessage(ctx, 1, 2, 0, "text", "offline")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	got, err := server.List(chatPushKey(2))
+	if err != nil {
+		t.Fatalf("read Redis queue: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("queued Redis messages = %d, want 1", len(got))
+	}
+
+	var deliveredIDs []string
+	connectionID := svc.RegisterConnection(ctx, 2, func(message *model.ChatMessage, offline bool) error {
+		if !offline {
+			t.Fatal("queued message was not marked offline")
+		}
+		deliveredIDs = append(deliveredIDs, message.ID)
+		return nil
+	}, nil, nil)
+	if len(deliveredIDs) != 1 || deliveredIDs[0] != message.ID {
+		t.Fatalf("delivered IDs = %#v, want [%q]", deliveredIDs, message.ID)
+	}
+	if server.Exists(chatPushKey(2)) {
+		t.Fatalf("Redis copy remained after successful offline delivery at %q", chatPushKey(2))
+	}
+
+	svc.UnregisterConnection(2, connectionID)
+	svc.RegisterConnection(ctx, 2, func(message *model.ChatMessage, offline bool) error {
+		deliveredIDs = append(deliveredIDs, message.ID)
+		return nil
+	}, nil, nil)
+	if len(deliveredIDs) != 1 {
+		t.Fatalf("offline message was replayed after reconnect; IDs = %#v", deliveredIDs)
+	}
+}
+
+func TestInspectChatEnvelope(t *testing.T) {
+	metadata := inspectChatEnvelope(`{"e2ee":1,"v":"x25519+chacha20poly1305:v1","key_id":"0123456789abcdef","nonce":"secret","ct":"secret"}`)
+	if metadata.E2EE != 1 || metadata.Version != "x25519+chacha20poly1305:v1" || metadata.KeyID != "0123456789abcdef" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+	if metadata := inspectChatEnvelope("plain text"); metadata.E2EE != 0 || metadata.KeyID != "" {
+		t.Fatalf("plain text metadata = %#v, want empty", metadata)
+	}
+}
+
 func TestChatServiceGroupMessagePermissionsAndDelivery(t *testing.T) {
 	ctx := context.Background()
 	groupRepo := newFakeGroupRepo()
@@ -180,6 +298,96 @@ func TestChatServiceGroupMessagePermissionsAndDelivery(t *testing.T) {
 	}
 	if delivered[2] != 1 || delivered[3] != 1 {
 		t.Fatalf("delivered counts = %#v, want one per non-sender member", delivered)
+	}
+}
+
+func TestChatServiceRejectsStaleE2EEKeyStateBeforeDelivery(t *testing.T) {
+	ctx := context.Background()
+	groups := newFakeGroupRepo()
+	groups.groups[10] = &model.ChatGroup{ID: 10, OwnerID: 1, Name: "group"}
+	groups.members[10] = map[uint]*model.ChatGroupMember{
+		1: {GroupID: 10, UserID: 1, Role: "owner"},
+		2: {GroupID: 10, UserID: 2, Role: "member"},
+	}
+	friends := newFakeFriendRepo()
+	friends.friendships[[2]uint{1, 2}] = true
+
+	keyRepo := newFakeE2EEKeyRepo()
+	senderKeyBytes := make([]byte, 32)
+	senderKeyBytes[0] = 1
+	recipientKeyBytes := make([]byte, 32)
+	recipientKeyBytes[0] = 2
+	keyRepo.keys[1] = &model.E2EEUserPublicKey{UserID: 1, PublicKey: base64.StdEncoding.EncodeToString(senderKeyBytes)}
+	keyRepo.keys[2] = &model.E2EEUserPublicKey{UserID: 2, PublicKey: base64.StdEncoding.EncodeToString(recipientKeyBytes)}
+	senderKeyID, _ := e2eePublicKeyID(keyRepo.keys[1].PublicKey)
+	recipientKeyID, _ := e2eePublicKeyID(keyRepo.keys[2].PublicKey)
+	groupKeys := newFakeE2EEGroupKeyRepo()
+	groupKeys.versions[10] = 3
+	wrappedKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	wrapNonce := base64.StdEncoding.EncodeToString(make([]byte, 12))
+	for _, userID := range []uint{1, 2} {
+		groupKeys.boxes[boxKey(10, 3, userID)] = &model.E2EEGroupKeyBox{
+			GroupID:         10,
+			KeyVersion:      3,
+			UserID:          userID,
+			WrappedGroupKey: wrappedKey,
+			WrapNonce:       wrapNonce,
+			KeyWrapAlg:      "chacha20poly1305-v1",
+			WrappedByUserID: 1,
+		}
+	}
+
+	svc := NewChatService(
+		friends,
+		groups,
+		WithE2EEMessageValidation(keyRepo, groupKeys),
+	)
+	delivered := 0
+	svc.RegisterConnection(ctx, 2, func(*model.ChatMessage, bool) error {
+		delivered++
+		return nil
+	}, nil, nil)
+
+	validNonce := base64.StdEncoding.EncodeToString(make([]byte, 12))
+	validCiphertext := base64.StdEncoding.EncodeToString(make([]byte, 17))
+	directEnvelope := map[string]any{
+		"e2ee": 1, "v": "x25519+chacha20poly1305:v1",
+		"nonce": validNonce, "ct": validCiphertext, "key_id": "0123456789abcdef",
+		"sender_key_id": senderKeyID, "recipient_key_id": recipientKeyID,
+	}
+	if _, err := svc.SendMessage(ctx, 1, 2, 0, "text", mustTestJSON(t, directEnvelope)); err != nil {
+		t.Fatalf("valid direct envelope rejected: %v", err)
+	}
+	directEnvelope["nonce"] = "not-base64"
+	if _, err := svc.SendMessage(ctx, 1, 2, 0, "text", mustTestJSON(t, directEnvelope)); !errors.Is(err, ErrE2EEMessageMalformed) {
+		t.Fatalf("malformed direct envelope error = %v, want ErrE2EEMessageMalformed", err)
+	}
+	directEnvelope["nonce"] = validNonce
+	directEnvelope["recipient_key_id"] = senderKeyID
+	if _, err := svc.SendMessage(ctx, 1, 2, 0, "text", mustTestJSON(t, directEnvelope)); !errors.Is(err, ErrE2EERecipientKeyStale) {
+		t.Fatalf("stale direct recipient key error = %v", err)
+	}
+
+	groupEnvelope := map[string]any{
+		"e2ee": 1, "v": "group+chacha20poly1305:v1", "scope": "group",
+		"group_id": 10, "key_version": 3, "nonce": validNonce, "ct": validCiphertext,
+		"sender_key_id": senderKeyID,
+	}
+	if _, err := svc.SendMessage(ctx, 1, 0, 10, "text", mustTestJSON(t, groupEnvelope)); err != nil {
+		t.Fatalf("valid group envelope rejected: %v", err)
+	}
+	groupEnvelope["key_version"] = 2
+	if _, err := svc.SendMessage(ctx, 1, 0, 10, "text", mustTestJSON(t, groupEnvelope)); !errors.Is(err, ErrE2EEGroupKeyStale) {
+		t.Fatalf("stale group key error = %v", err)
+	}
+	groupEnvelope["key_version"] = 3
+	delete(groupKeys.boxes, boxKey(10, 3, 2))
+	if _, err := svc.SendMessage(ctx, 1, 0, 10, "text", mustTestJSON(t, groupEnvelope)); !errors.Is(err, ErrE2EEGroupKeyNotReady) {
+		t.Fatalf("incomplete group key boxes error = %v", err)
+	}
+
+	if delivered != 2 {
+		t.Fatalf("delivery count = %d, want only two valid encrypted messages", delivered)
 	}
 }
 

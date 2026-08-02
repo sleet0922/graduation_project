@@ -122,7 +122,18 @@ func (s *friendService) HandleFriendRequest(ctx context.Context, userID, request
 
 // 获取用户的好友请求列表
 func (s *friendService) GetFriendRequestsByUserID(ctx context.Context, userID uint) ([]*model.FriendRequest, error) {
-	return s.friendRepo.GetRequestsByReceiverID(ctx, userID)
+	requests, err := s.friendRepo.GetRequestsByReceiverID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, request := range requests {
+		sender, err := s.userRepo.GetByID(ctx, request.SenderID)
+		if err != nil {
+			return nil, err
+		}
+		request.Sender = sender
+	}
+	return requests, nil
 }
 
 // 删除好友

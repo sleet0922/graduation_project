@@ -308,10 +308,21 @@ func (r *fakeFriendRepo) UpdateRequestStatus(ctx context.Context, request *model
 }
 
 func (r *fakeFriendRepo) GetRequestsByReceiverID(ctx context.Context, receiverID uint) ([]*model.FriendRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.err != nil {
 		return nil, r.err
 	}
-	return nil, nil
+	requests := make([]*model.FriendRequest, 0)
+	for _, request := range r.requests {
+		if request.ReceiverID != receiverID {
+			continue
+		}
+		copied := *request
+		requests = append(requests, &copied)
+	}
+	sort.Slice(requests, func(i, j int) bool { return requests[i].ID < requests[j].ID })
+	return requests, nil
 }
 
 func (r *fakeFriendRepo) AcceptFriendRequest(ctx context.Context, request *model.FriendRequest) error {
