@@ -4,9 +4,9 @@ ARG LIVEKIT_SHA256=50633b65316b0b8c854fb4bee4ae4040839fcf5c149bccb9ae2097fb75269
 ARG LIVEKIT_GOPROXY=https://goproxy.cn
 ARG LIVEKIT_GOPROXY_SHA256=56f15714ce38a4a299de1242cf324c2a5e0d0b19115d23c3a26da946934b6fd3
 ARG POSTGRESQL_VERSION=18
-ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 ARG PGDG_MIRROR=https://mirrors.cloud.tencent.com/postgresql/repos/apt
 ARG PGDG_FALLBACK=https://apt.postgresql.org/pub/repos/apt
+MIRROR china
 
 FROM debian/13
 NAME graduation-project
@@ -14,17 +14,8 @@ NETWORK nat
 
 # API and LiveKit share one disposable Go toolchain.
 TEMP builder
-RUN rm -f /etc/apt/sources.list.d/debian.sources && \
-    printf '%s\n' \
-      "deb $DEBIAN_MIRROR/debian trixie main contrib non-free non-free-firmware" \
-      "deb $DEBIAN_MIRROR/debian trixie-updates main contrib non-free non-free-firmware" \
-      "deb $DEBIAN_MIRROR/debian-security trixie-security main contrib non-free non-free-firmware" \
-      > /etc/apt/sources.list
 ASDF go ${GO_VERSION}
-RUN DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      unzip \
-      wget && \
-    rm -rf /var/lib/apt/lists/*
+PKG unzip wget
 
 WORKDIR /src/graduation-project
 COPY go.mod ./go.mod
@@ -71,21 +62,7 @@ RUN set -eu; \
 END
 
 # Keep TUNA as Debian's permanent source and prefer Tencent's PGDG mirror.
-RUN rm -f /etc/apt/sources.list.d/debian.sources && \
-    printf '%s\n' \
-      "deb $DEBIAN_MIRROR/debian trixie main contrib non-free non-free-firmware" \
-      "deb $DEBIAN_MIRROR/debian trixie-updates main contrib non-free non-free-firmware" \
-      "deb $DEBIAN_MIRROR/debian-security trixie-security main contrib non-free non-free-firmware" \
-      > /etc/apt/sources.list
-RUN apt-get -o Acquire::Retries=3 update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates \
-      wget \
-      gnupg \
-      openssl \
-      postgresql-common \
-      redis-server \
-      caddy
+PKG ca-certificates wget gnupg openssl postgresql-common redis-server caddy
 RUN set -eu; \
     key_file=/tmp/ACCC4CF8.asc; \
     keyring=/usr/share/keyrings/postgresql-pgdg.gpg; \
