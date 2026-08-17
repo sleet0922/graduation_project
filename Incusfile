@@ -122,8 +122,8 @@ COPY configs/systemd/graduation-project.service /etc/systemd/system/graduation-p
 COPY configs/systemd/livekit.service /etc/systemd/system/livekit.service
 COPY configs/livekit.yaml /etc/livekit/livekit.yaml
 COPY configs/Caddyfile /etc/caddy/Caddyfile
-COPY ssl/1.key /etc/caddy/certs/1.pem
-COPY ssl/1.pem /etc/caddy/certs/1.key
+COPY ssl/1.pem /etc/caddy/certs/1.pem
+COPY ssl/1.key /etc/caddy/certs/1.key
 ENV ZAT_DATABASE_AUTO_MIGRATE=true
 
 # Initialize the database once while building, then publish it stopped.
