@@ -1,8 +1,8 @@
 [Unit]
 Description=Graduation project Go API
-After=network-online.target graduation-project-bootstrap.service
+After=network-online.target postgresql@@POSTGRESQL_VERSION@-main.service redis-server.service
 Wants=network-online.target
-Requires=graduation-project-bootstrap.service
+Requires=postgresql@@POSTGRESQL_VERSION@-main.service redis-server.service
 
 [Service]
 Type=simple

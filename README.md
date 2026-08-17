@@ -11,27 +11,34 @@ the Incusfile downloads the v1.13.5 source archive from:
 https://github.com/livekit/livekit/archive/refs/tags/v1.13.5.tar.gz
 ```
 
-If GitHub is unavailable, a domestic proxy is used as a fallback. The archive
-SHA-256 and source version are verified before compilation.
+If GitHub is unavailable, the same tagged source is downloaded from a domestic
+Go module proxy. Both archive formats have pinned SHA-256 values, and the source
+version is verified before compilation.
+
+The API and LiveKit share one temporary builder. Its `ASDF go ${GO_VERSION}`
+directive asks Bocker to install the exact Go version through embedded asdf,
+then discard asdf, the Go toolchain and all build dependencies. The Incusfile
+performs all package installation, compilation and database initialization
+directly. Static Caddy, LiveKit and systemd configuration lives under `configs/`.
 
 Requirements:
 
-- Bocker 3.1.6 or newer
-- GNU Make
+- Bocker 3.1.8 or newer
 - `ssl/1.pem` and `ssl/1.key`
 - free host ports `81/tcp`, `444/tcp`, `444/udp`, `7881/tcp` and `7882/udp`
 
-Build and start the complete backend with one command:
+Build the complete backend directly from the Incusfile, then start it:
 
 ```bash
-make build-bocker
+bocker image build --permission super --network nat --name graduation-project ./Incusfile
+bocker image run graduation-project --name graduation-project --permission super --network nat
 ```
 
-The target builds and starts the container with `--permission super` and NAT
-networking. Once started, verify it with:
+Once started, verify it with:
 
 ```bash
-make bocker-status
+bocker container exec graduation-project \
+  systemctl is-active postgresql@18-main redis-server graduation-project livekit caddy
 curl -k https://127.0.0.1:444/health
 ```
 
