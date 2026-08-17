@@ -5,9 +5,22 @@ NETWORK nat
 # Build the API with the Go version required by go.mod. The compiler and module
 # cache stay in this temporary stage.
 TEMP api-builder
-RUN rm -f /etc/apt/sources.list.d/debian.sources && printf '%s\n' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie main contrib non-free non-free-firmware' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie-updates main contrib non-free non-free-firmware' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' > /etc/apt/sources.list
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
-RUN wget -q https://golang.google.cn/dl/go1.26.6.linux-$(dpkg --print-architecture).tar.gz -O /tmp/go.tar.gz && tar -C /usr/local -xzf /tmp/go.tar.gz && rm -f /tmp/go.tar.gz
+RUN rm -f /etc/apt/sources.list.d/debian.sources && \
+    printf '%s\n' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie main contrib non-free non-free-firmware' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie-updates main contrib non-free non-free-firmware' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' \
+      > /etc/apt/sources.list
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates \
+      wget && \
+    rm -rf /var/lib/apt/lists/*
+RUN wget -q \
+      https://golang.google.cn/dl/go1.26.6.linux-$(dpkg --print-architecture).tar.gz \
+      -O /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm -f /tmp/go.tar.gz
 ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV GOPROXY=https://goproxy.cn,direct
 ENV GOSUMDB=sum.golang.google.cn
@@ -18,25 +31,100 @@ RUN go mod download
 COPY cmd /src/cmd
 COPY internal /src/internal
 COPY pkg /src/pkg
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/graduation-project ./cmd/api
+RUN CGO_ENABLED=0 go build \
+      -trimpath \
+      -ldflags='-s -w' \
+      -o /out/graduation-project \
+      ./cmd/api
 END
 
 # LiveKit is downloaded from the pinned v1.13.5 archive and compiled here.
 TEMP livekit-builder
-RUN rm -f /etc/apt/sources.list.d/debian.sources && printf '%s\n' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie main contrib non-free non-free-firmware' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie-updates main contrib non-free non-free-firmware' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' > /etc/apt/sources.list
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
-RUN wget -q https://golang.google.cn/dl/go1.26.6.linux-$(dpkg --print-architecture).tar.gz -O /tmp/go.tar.gz && tar -C /usr/local -xzf /tmp/go.tar.gz && rm -f /tmp/go.tar.gz
+RUN rm -f /etc/apt/sources.list.d/debian.sources && \
+    printf '%s\n' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie main contrib non-free non-free-firmware' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie-updates main contrib non-free non-free-firmware' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' \
+      > /etc/apt/sources.list
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates \
+      wget && \
+    rm -rf /var/lib/apt/lists/*
+RUN wget -q \
+      https://golang.google.cn/dl/go1.26.6.linux-$(dpkg --print-architecture).tar.gz \
+      -O /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm -f /tmp/go.tar.gz
 ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV GOPROXY=https://goproxy.cn,direct
 ENV GOSUMDB=sum.golang.google.cn
 WORKDIR /src
-RUN (wget --timeout=20 --tries=1 https://github.com/livekit/livekit/archive/refs/tags/v1.13.5.tar.gz -O /tmp/livekit-v1.13.5.tar.gz || wget --timeout=30 --tries=3 https://gh-proxy.com/https://github.com/livekit/livekit/archive/refs/tags/v1.13.5.tar.gz -O /tmp/livekit-v1.13.5.tar.gz) && echo '50633b65316b0b8c854fb4bee4ae4040839fcf5c149bccb9ae2097fb7526991c  /tmp/livekit-v1.13.5.tar.gz' | sha256sum -c - && tar -xzf /tmp/livekit-v1.13.5.tar.gz -C /src && test "$(sed -n 's/^const Version = \"\([^\"]*\)\"/\1/p' /src/livekit-1.13.5/version/version.go)" = '1.13.5' && cd /src/livekit-1.13.5 && GOMAXPROCS=2 CGO_ENABLED=0 go build -p 2 -trimpath -ldflags='-s -w' -o /out/livekit-server ./cmd/server && chmod 0755 /out/livekit-server
+RUN ( \
+      wget --timeout=20 --tries=1 \
+        https://github.com/livekit/livekit/archive/refs/tags/v1.13.5.tar.gz \
+        -O /tmp/livekit-v1.13.5.tar.gz || \
+      wget --timeout=30 --tries=3 \
+        https://gh-proxy.com/https://github.com/livekit/livekit/archive/refs/tags/v1.13.5.tar.gz \
+        -O /tmp/livekit-v1.13.5.tar.gz \
+    ) && \
+    echo '50633b65316b0b8c854fb4bee4ae4040839fcf5c149bccb9ae2097fb7526991c  /tmp/livekit-v1.13.5.tar.gz' | sha256sum -c - && \
+    tar -xzf /tmp/livekit-v1.13.5.tar.gz -C /src && \
+    test "$(sed -n 's/^const Version = \"\([^\"]*\)\"/\1/p' /src/livekit-1.13.5/version/version.go)" = '1.13.5' && \
+    cd /src/livekit-1.13.5 && \
+    GOMAXPROCS=2 CGO_ENABLED=0 go build \
+      -p 2 \
+      -trimpath \
+      -ldflags='-s -w' \
+      -o /out/livekit-server \
+      ./cmd/server && \
+    chmod 0755 /out/livekit-server
 END
 
-# Keep TUNA as Debian's permanent apt source. PostgreSQL packages come from
-# Aliyun's domestic PGDG mirror because TUNA does not publish trixie-pgdg.
-RUN rm -f /etc/apt/sources.list.d/debian.sources && printf '%s\n' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie main contrib non-free non-free-firmware' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie-updates main contrib non-free non-free-firmware' 'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' > /etc/apt/sources.list
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates wget gnupg openssl postgresql-common redis-server caddy && wget -q https://www.postgresql.org/media/keys/ACCC4CF8.asc -O /tmp/ACCC4CF8.asc && test "$(gpg --show-keys --with-colons /tmp/ACCC4CF8.asc | cut -d: -f1,10 | sed -n 's/^fpr://p' | head -n 1)" = 'B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' && gpg --batch --yes --dearmor --output /usr/share/keyrings/postgresql-pgdg.gpg /tmp/ACCC4CF8.asc && printf '%s\n' 'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://mirrors.aliyun.com/postgresql/repos/apt trixie-pgdg main' > /etc/apt/sources.list.d/postgresql-pgdg.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-18 postgresql-client-18 && rm -f /tmp/ACCC4CF8.asc && rm -rf /var/lib/apt/lists/*
+# Keep TUNA as Debian's permanent apt source. PostgreSQL packages prefer
+# Tencent's domestic PGDG mirror; use the official PGDG endpoint only when the
+# domestic mirror cannot provide a consistent signed index.
+RUN rm -f /etc/apt/sources.list.d/debian.sources && \
+    printf '%s\n' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie main contrib non-free non-free-firmware' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian trixie-updates main contrib non-free non-free-firmware' \
+      'deb https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware' \
+      > /etc/apt/sources.list
+RUN apt-get -o Acquire::Retries=3 update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates \
+      wget \
+      gnupg \
+      openssl \
+      postgresql-common \
+      redis-server \
+      caddy && \
+    wget -q \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      -O /tmp/ACCC4CF8.asc && \
+    test "$(gpg --show-keys --with-colons /tmp/ACCC4CF8.asc | cut -d: -f1,10 | sed -n 's/^fpr://p' | head -n 1)" = \
+      'B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' && \
+    gpg --batch --yes --dearmor \
+      --output /usr/share/keyrings/postgresql-pgdg.gpg \
+      /tmp/ACCC4CF8.asc && \
+    printf '%s\n' \
+      'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://mirrors.cloud.tencent.com/postgresql/repos/apt trixie-pgdg main' \
+      > /etc/apt/sources.list.d/postgresql-pgdg.list && \
+    ( \
+      apt-get -o Acquire::Retries=3 update || \
+      ( \
+        rm -rf /var/lib/apt/lists/* && \
+        printf '%s\n' \
+          'deb [signed-by=/usr/share/keyrings/postgresql-pgdg.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main' \
+          > /etc/apt/sources.list.d/postgresql-pgdg.list && \
+        apt-get -o Acquire::Retries=3 update \
+      ) \
+    ) && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      postgresql-18 \
+      postgresql-client-18 && \
+    rm -f /tmp/ACCC4CF8.asc && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/graduation-project
 COPY --from=api-builder /out/graduation-project /usr/local/bin/graduation-project
@@ -54,7 +142,49 @@ COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY ssl/1.key /etc/caddy/certs/1.pem
 COPY ssl/1.pem /etc/caddy/certs/1.key
 
-RUN useradd --system --home /var/lib/graduation-project --shell /usr/sbin/nologin graduation-project && useradd --system --home /var/lib/livekit --shell /usr/sbin/nologin livekit && install -d -m 0750 -o graduation-project -g graduation-project /var/lib/graduation-project /var/log/graduation-project /opt/graduation-project/logs && install -d -m 0750 -o livekit -g livekit /var/lib/livekit && chmod 0755 /usr/local/bin/graduation-project /usr/local/bin/livekit-server /usr/local/lib/graduation-project-bootstrap && chown root:caddy /etc/caddy/certs/1.pem /etc/caddy/certs/1.key && chmod 0644 /etc/caddy/certs/1.pem && chmod 0640 /etc/caddy/certs/1.key && openssl x509 -in /etc/caddy/certs/1.pem -noout -checkend 0 && openssl pkey -in /etc/caddy/certs/1.key -noout -check && sed -ri "s/^#?listen_addresses\s*=.*/listen_addresses = '127.0.0.1'/" /etc/postgresql/18/main/postgresql.conf && caddy fmt --overwrite /etc/caddy/Caddyfile && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && systemctl enable postgresql@18-main.service redis-server.service graduation-project-bootstrap.service graduation-project.service livekit.service caddy.service
+RUN useradd --system \
+      --home /var/lib/graduation-project \
+      --shell /usr/sbin/nologin \
+      graduation-project && \
+    useradd --system \
+      --home /var/lib/livekit \
+      --shell /usr/sbin/nologin \
+      livekit && \
+    install -d -m 0750 \
+      -o graduation-project \
+      -g graduation-project \
+      /var/lib/graduation-project \
+      /var/log/graduation-project \
+      /opt/graduation-project/logs && \
+    install -d -m 0750 \
+      -o livekit \
+      -g livekit \
+      /var/lib/livekit && \
+    chmod 0755 \
+      /usr/local/bin/graduation-project \
+      /usr/local/bin/livekit-server \
+      /usr/local/lib/graduation-project-bootstrap && \
+    chown root:caddy \
+      /etc/caddy/certs/1.pem \
+      /etc/caddy/certs/1.key && \
+    chmod 0644 /etc/caddy/certs/1.pem && \
+    chmod 0640 /etc/caddy/certs/1.key && \
+    openssl x509 -in /etc/caddy/certs/1.pem -noout -checkend 0 && \
+    openssl pkey -in /etc/caddy/certs/1.key -noout -check && \
+    sed -ri \
+      "s/^#?listen_addresses\s*=.*/listen_addresses = '127.0.0.1'/" \
+      /etc/postgresql/18/main/postgresql.conf && \
+    caddy fmt --overwrite /etc/caddy/Caddyfile && \
+    caddy validate \
+      --config /etc/caddy/Caddyfile \
+      --adapter caddyfile && \
+    systemctl enable \
+      postgresql@18-main.service \
+      redis-server.service \
+      graduation-project-bootstrap.service \
+      graduation-project.service \
+      livekit.service \
+      caddy.service
 
 # Caddy carries HTTP, HTTPS, API WebSockets and LiveKit signaling. LiveKit's
 # ICE TCP/UDP sockets also need host mappings for media to cross NAT.
