@@ -55,13 +55,13 @@ func InitDB(cfg *config.ViperConfig) *gorm.DB {
 			logger.Fatal("数据库迁移失败", slog.Any("error", err))
 		}
 
-		// 修复 feed_like 表：移除软删除残留数据，确保唯一索引正常工作
-		// 1. 删除旧软删除记录（deleted_at IS NOT NULL），避免唯一索引冲突
-		if err := db.Exec("DELETE FROM feed_like WHERE deleted_at IS NOT NULL").Error; err != nil {
-			logger.Fatal("清理feed_like软删除数据失败", slog.Any("error", err))
+		// Older deployments used soft deletes. Fresh schemas do not have this
+		// column, so only clean legacy rows when the column is actually present.
+		if db.Migrator().HasColumn(&model.FeedLike{}, "deleted_at") {
+			if err := db.Exec("DELETE FROM feed_like WHERE deleted_at IS NOT NULL").Error; err != nil {
+				logger.Fatal("清理feed_like软删除数据失败", slog.Any("error", err))
+			}
 		}
-		// 2. 如果 deleted_at 列仍存在（旧表升级），清理后不影响新逻辑
-		// 注意：AutoMigrate 不会自动删除列，此处仅清理数据
 	} else {
 		logger.Info("数据库自动迁移已关闭")
 	}

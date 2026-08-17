@@ -1,0 +1,20 @@
+[Unit]
+Description=Graduation project Go API
+After=network-online.target graduation-project-bootstrap.service
+Wants=network-online.target
+Requires=graduation-project-bootstrap.service
+
+[Service]
+Type=simple
+User=graduation-project
+Group=graduation-project
+WorkingDirectory=/opt/graduation-project
+EnvironmentFile=/etc/graduation-project/runtime.env
+ExecStart=/usr/local/bin/graduation-project
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

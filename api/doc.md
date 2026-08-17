@@ -1,913 +1,1137 @@
-# ZAT API 文档
+# Graduation Project API
 
-> 基础地址: `https://api.gelsomino.cn:443`  
-> 协议: HTTPS · 数据格式: JSON · 编码: UTF-8
+本文档对应当前后端路由实现，并于 2026-08-17 在公网环境逐项验证。
 
----
+- HTTPS 基础地址：`https://mini.gelsomino.cn:444`
+- WebSocket 基础地址：`wss://mini.gelsomino.cn:444`
+- HTTP `81` 端口会重定向到 HTTPS `444`
+- 数据格式：JSON，编码：UTF-8
+- 实测范围：52 个 HTTP 接口、2 个 WebSocket 入口，共 79 项断言
 
-## 通用说明
+## 1. 通用约定
 
-### 响应格式
+### 1.1 HTTP 响应
+
+除 `/health` 外，HTTP 接口统一返回：
 
 ```json
 {
   "code": 200,
-  "message": "ok",
+  "message": "操作结果",
   "data": {}
 }
 ```
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| code | int | 200 = 成功，其他见错误码表 |
-| message | string | 提示信息 |
-| data | any | 业务数据，失败时为 null |
+| --- | --- | --- |
+| `code` | int | `200` 表示成功；失败时可能是 HTTP 状态码或业务错误码 |
+| `message` | string | 中文或英文结果说明 |
+| `data` | any | 成功数据；无返回数据或失败时通常为 `null` |
 
-### 认证
+常用 HTTP 状态码：
 
-需要认证的接口在请求头中携带：
+| HTTP 状态码 | 说明 |
+| --- | --- |
+| `200` | 请求成功；注册重复用户时 HTTP 仍可能为 200，但业务 `code=10001` |
+| `400` | JSON、Query 或业务参数错误 |
+| `401` | 缺少认证、Token 无效、密码错误或会话失效 |
+| `403` | 无操作权限 |
+| `404` | 用户、群聊、动态、密钥或通话不存在 |
+| `409` | 状态冲突，例如 RTC 忙线或 E2EE 版本冲突 |
+| `428` | 群密钥版本存在，但当前用户的密钥盒尚未发布 |
+| `500` | 服务端或外部服务异常 |
 
-```
+业务错误码：
+
+| `code` | 说明 |
+| --- | --- |
+| `10001` | 用户已存在 |
+| `10002` | 用户不存在 |
+| `10003` | 密码错误 |
+| `10004` | Token 生成失败 |
+| `10005` | Token 解析失败 |
+| `10006` | Token 已过期 |
+
+### 1.2 认证与会话
+
+标记为“需要认证”的 HTTP 接口应携带：
+
+```http
 Authorization: Bearer <access_token>
 ```
 
-WebSocket 支持两种方式：Header（优先）或 URL 参数 `?token=<token>`。
+WebSocket 可使用相同 Header，也可使用 `?token=<access_token>`。Access Token
+不能替换为 Refresh Token。
 
-### Token 体系
+| Token | 默认有效期 | 用途 |
+| --- | --- | --- |
+| Access Token | 86400 秒 | HTTP 和 WebSocket 业务请求 |
+| Refresh Token | 2592000 秒 | 轮换 Access Token 和 Refresh Token |
 
-| 类型 | 有效期 | 用途 |
-|------|--------|------|
-| Access Token | 24h | 访问业务接口，内含 session_id |
-| Refresh Token | 30d | 刷新时同步轮换，session_id 不变 |
+每次登录会创建新的 `session_id` 并使该账号之前的会话失效。旧 HTTP 请求会收到
+`401` 和 `账号在其他设备登录，请重新登录`；已连接的聊天 WebSocket 会先收到
+`kicked` 事件再断开。
 
-### 多设备登录踢下线
+## 2. 路由总览
 
-- 每次登录生成新 `session_id` 写入 Redis，旧连接被踢下线
-- WebSocket 收到 `{ "type": "kicked", "reason": "账号在其他设备登录" }` 后清 token 跳登录页
-- WebSocket 连接时若 session 失效返回 401 `"账号在其他设备登录，请重新登录"`
+| 分类 | 方法 | 路径 | 认证 |
+| --- | --- | --- | --- |
+| 健康 | GET | `/health` | 否 |
+| 用户 | POST | `/api/user/register` | 否 |
+| 用户 | POST | `/api/user/login` | 否 |
+| 用户 | POST | `/api/user/refresh` | 否 |
+| 用户 | POST | `/api/user/self` | 是 |
+| 用户 | GET | `/api/user/search` | 是 |
+| 用户 | POST | `/api/user/name_update` | 是 |
+| 用户 | POST | `/api/user/avatar_update` | 是 |
+| 用户 | POST | `/api/user/password_update` | 是 |
+| 用户 | POST | `/api/user/profile_update` | 是 |
+| 用户 | POST | `/api/user/location` | 是 |
+| 用户 | POST | `/api/user/delete` | 是 |
+| OSS | GET | `/api/oss/upload-url` | 是 |
+| OSS | GET | `/api/oss/download-url` | 否 |
+| OSS | POST | `/api/chat/upload/image` | 是 |
+| OSS | POST | `/api/chat/upload/video` | 是 |
+| 好友 | POST | `/api/friend/request` | 是 |
+| 好友 | GET | `/api/friend/requests` | 是 |
+| 好友 | POST | `/api/friend/handle` | 是 |
+| 好友 | GET | `/api/friend/list` | 是 |
+| 好友 | POST | `/api/friend/check` | 是 |
+| 好友 | POST | `/api/friend/remark_update` | 是 |
+| 好友 | POST | `/api/friend/delete` | 是 |
+| 群聊 | POST | `/api/group/create` | 是 |
+| 群聊 | GET | `/api/group/list` | 是 |
+| 群聊 | GET | `/api/group/members` | 是 |
+| 群聊 | POST | `/api/group/member/add` | 是 |
+| 群聊 | POST | `/api/group/member/remove` | 是 |
+| 群聊 | POST | `/api/group/leave` | 是 |
+| 群聊 | POST | `/api/group/delete` | 是 |
+| E2EE | POST | `/api/e2ee/keys/publish` | 是 |
+| E2EE | GET | `/api/e2ee/keys/public` | 是 |
+| E2EE | GET | `/api/e2ee/group/key/current` | 是 |
+| E2EE | GET | `/api/e2ee/group/key/by-version` | 是 |
+| E2EE | POST | `/api/e2ee/group/key/publish` | 是 |
+| E2EE | POST | `/api/e2ee/group/key/rotate` | 是 |
+| RTC | POST | `/api/rtc/call/invite` | 是 |
+| RTC | POST | `/api/rtc/call/accept` | 是 |
+| RTC | POST | `/api/rtc/call/reject` | 是 |
+| RTC | POST | `/api/rtc/call/cancel` | 是 |
+| RTC | POST | `/api/rtc/call/hangup` | 是 |
+| RTC | POST | `/api/rtc/token` | 是 |
+| 动态 | POST | `/api/feed/create` | 是 |
+| 动态 | DELETE | `/api/feed/delete` | 是 |
+| 动态 | GET | `/api/feed/detail` | 是 |
+| 动态 | GET | `/api/feed/list` | 是 |
+| 动态 | GET | `/api/feed/my_posts` | 是 |
+| 动态 | POST | `/api/feed/like` | 是 |
+| 动态 | GET | `/api/feed/is_liked` | 是 |
+| 动态 | POST | `/api/feed/comment` | 是 |
+| 动态 | DELETE | `/api/feed/comment` | 是 |
+| 动态 | GET | `/api/feed/comments` | 是 |
+| WebSocket | GET | `/ws/chat` | 是 |
+| WebSocket | GET | `/ws/online` | 是 |
 
----
+## 3. 健康检查
 
-## 一、用户
+### GET `/health`
 
-### POST /api/user/register
-
-注册账号。系统自动生成 10 位数字账号，昵称默认为"未命名用户"。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| email | string | 是 |
-| password | string | 是 |
-
-**返回** `{ id, account, name, email }`
-
----
-
-### POST /api/user/login
-
-支持邮箱或数字账号登录。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| account | string | 是 |
-| password | string | 是 |
-
-**返回**
+无需认证。成功时 HTTP 200：
 
 ```json
 {
-  "token": "...",
-  "refresh_token": "...",
+  "status": "ok"
+}
+```
+
+## 4. 用户接口
+
+### POST `/api/user/register`
+
+无需认证。系统生成 10 位数字账号，初始昵称为 `未命名用户`。
+
+```json
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+| 字段 | 类型 | 必填 | 约束 |
+| --- | --- | --- | --- |
+| `email` | string | 是 | 必须符合邮箱格式且未注册 |
+| `password` | string | 是 | 8 至 128 字符 |
+
+成功 `data`：`{ id, account, name, email }`。
+
+### POST `/api/user/login`
+
+无需认证，`account` 可传邮箱或系统生成的数字账号。
+
+```json
+{
+  "account": "user@example.com",
+  "password": "password123"
+}
+```
+
+成功 `data`：
+
+```json
+{
+  "token": "<access_token>",
+  "refresh_token": "<refresh_token>",
   "expires_in": 86400,
   "refresh_expires_in": 2592000,
-  "session_id": "a1b2c3...",
+  "session_id": "32位十六进制字符串",
   "user": {
-    "id": 1, "account": "...", "name": "...", "avatar": "...",
-    "email": "...", "gender": 0, "birthday": "", "location": ""
+    "id": 1,
+    "account": "1234567890",
+    "name": "未命名用户",
+    "avatar": "",
+    "email": "user@example.com",
+    "gender": 0,
+    "birthday": "",
+    "location": ""
   }
 }
 ```
 
-> `session_id`: 32 位 hex 字符串，已嵌入 token 中，前端无需单独存储。新设备登录会使旧 session 失效。
+### POST `/api/user/refresh`
 
----
+无需 Access Token。
 
-### POST /api/user/refresh
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| refresh_token | string | 是 |
-
-**返回** `{ token, refresh_token, expires_in, refresh_expires_in }`
-
-> 每次刷新都会 **轮换** refresh_token（旧的立即失效），前端应替换本地存储的两个 token。
-
----
-
-### POST /api/user/self  🔒
-
-获取当前登录用户完整信息。
-
-**返回** `{ id, account, name, avatar, email, gender, birthday, location }`
-
----
-
-### GET /api/user/search  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| keyword | string | 是 |
-
-支持按邮箱或 10 位账号搜索。
-
-**返回** `{ id, account, name, avatar, email, gender, birthday, location }`
-
----
-
-### POST /api/user/name_update  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| name | string | 是 |
-
-**返回** `{ id, name }`
-
----
-
-### POST /api/user/avatar_update  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| avatar | string | 是 |
-
-值为 OSS 上传返回的文件名（如 `avatar_6_1776183103821.jpg`）。
-
-**返回** `{ id, object_key }`
-
----
-
-### POST /api/user/password_update  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| password | string | 是（原密码） |
-| new_password | string | 是（新密码） |
-
----
-
-### POST /api/user/profile_update  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| gender | int | 否 | 0=未知 1=男 2=女 |
-| birthday | string | 否 | 格式 YYYY-MM-DD |
-| location | string | 否 | 地区 |
-
-**返回** `{ id, gender, birthday, location }`
-
----
-
-### POST /api/user/location  🔒
-
-上报用户地理位置。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| latitude | float | 是 | 纬度 |
-| longitude | float | 是 | 经度 |
-| province | string | 否 | 省份 |
-| city | string | 否 | 城市 |
-| district | string | 否 | 区/县 |
-| address | string | 否 | 详细地址 |
-| timestamp | int64 | 否 | Unix 时间戳（秒） |
-
----
-
-### POST /api/user/delete  🔒
-
-注销当前账号（软删除）。
-
----
-
-## 二、OSS 文件存储
-
-### GET /api/oss/upload-url  🔒
-
-获取预签名上传 URL，前端直接用 PUT 上传文件。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| key | string | 是 | 文件名 |
-| type | string | 否 | `avatar` / `chat` / `video`，默认 `chat` |
-
-**返回** `{ upload_url, access_url, expires_in: "1小时" }`
-
-**流程**: 调此接口 → 拿 upload_url 做 PUT 上传 → 使用 access_url
-
----
-
-### GET /api/oss/download-url
-
-获取预签名下载 URL。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| key | string | 是 | 自动识别前缀（`avatar_` → `avatar/`, `chat_` → `chat/`） |
-
-**返回** `{ download_url, expires_in: "1小时" }`
-
----
-
-### POST /api/chat/upload/image  🔒
-
-直传聊天图片（multipart/form-data）。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| file | file | 是 | 最大 10MB，支持 image/* 或 application/octet-stream |
-
-**返回** `{ url, content, filename, contentType }`
-
----
-
-### POST /api/chat/upload/video  🔒
-
-直传聊天视频（multipart/form-data）。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| file | file | 是 | 最大 100MB，支持 video/* 或 application/octet-stream |
-
-**返回** `{ url, content, filename, contentType }`
-
----
-
-## 三、好友
-
-### POST /api/friend/request  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| friend_id | uint | 否 | 对方 ID，与 account 二选一 |
-| account | string | 否 | 对方邮箱或账号，与 friend_id 二选一 |
-
-> 边界: `不能添加自己为好友` / `你们已经是好友了` / `好友申请已存在`
-
----
-
-### GET /api/friend/requests  🔒
-
-获取收到的好友申请列表。
-
-**返回** `[{ id, sender_id, receiver_id, status, created_at }]`
-
-status: `0`=待处理 `1`=已接受 `2`=已拒绝
-
----
-
-### POST /api/friend/handle  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| request_id | uint | 是 | 申请记录 ID |
-| status | uint | 是 | 1=接受 2=拒绝 |
-
----
-
-### GET /api/friend/list  🔒
-
-好友列表（含用户详情和备注）。
-
-**返回** `[{ id, user_id, friend_id, account, name, email, avatar, gender, birthday, location, remark }]`
-
----
-
-### POST /api/friend/check  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| friend_id | uint | 是 |
-
-**返回** `{ is_friend: true/false }`
-
----
-
-### POST /api/friend/delete  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| friend_id | uint | 是 |
-
----
-
-### POST /api/friend/remark_update  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| friend_id | uint | 是 |
-| remark | string | 否 |
-
----
-
-## 四、群聊
-
-### POST /api/group/create  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| name | string | 是 | 群名称 |
-| avatar | string | 否 | 头像文件名 |
-| member_ids | []uint | 否 | 初始成员（必须已是好友） |
-
-**返回** `{ id, name, avatar, owner_id, member_count, created_at, updated_at }`
-
----
-
-### GET /api/group/list  🔒
-
-当前用户加入的所有群聊。
-
-**返回** `[{ id, name, avatar, owner_id, member_count, created_at, updated_at }]`
-
----
-
-### GET /api/group/members  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| group_id | uint | 是（query） |
-
-**返回** `[{ user_id, account, name, email, avatar, role }]`
-
-role: `owner` / `member`
-
----
-
-### POST /api/group/member/add  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| group_id | uint | 是 |
-| member_ids | []uint | 是（必须是好友） |
-
-**返回**: 群成员列表（同上格式）
-
----
-
-### POST /api/group/member/remove  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| group_id | uint | 是 | |
-| member_id | uint | 是 | 仅群主可操作，不能移除群主 |
-
----
-
-### POST /api/group/leave  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| group_id | uint | 是 |
-
-> 群主不能直接退出，需先解散。
-
----
-
-### POST /api/group/delete  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| group_id | uint | 是 | 仅群主可解散 |
-
-解散后通过 WebSocket 向所有成员广播 `group_dissolved` 事件。
-
----
-
-## 五、WebSocket 实时聊天
-
-### 连接
-
-```
-wss://api.gelsomino.cn:443/ws/chat
-```
-
-认证: Header `Authorization: Bearer <token>`（主）或 `?token=<token>`（备）。
-
-连接成功收到 `{ "type": "connected", "user_id": N }`
-
-### 心跳
-
-- **服务端**: 每 5s 发 Ping 帧，3s 内未收到 Pong 则断开。
-- **客户端**: 可主动发送 `{ "type": "ping" }`，服务端回复 `{ "type": "pong" }`。
-
----
-
-### 发送消息
-
-**单聊**:
 ```json
-{ "type": "chat", "to_user_id": 9, "message_type": "text", "content": "你好" }
+{
+  "refresh_token": "<refresh_token>"
+}
 ```
 
-**群聊**:
+成功 `data`：`{ token, refresh_token, expires_in, refresh_expires_in }`。每次成功
+刷新都会轮换 Refresh Token，旧 Refresh Token 立即失效。
+
+### POST `/api/user/self`
+
+需要认证，无请求体。返回当前用户完整记录。用户业务字段使用小写键，例如
+`name`、`account`、`email`、`avatar`、`gender`、`birthday`、`location` 和
+`user_status`；GORM 基础字段为 `ID`、`CreatedAt`、`UpdatedAt`、`DeletedAt`。
+
+### GET `/api/user/search`
+
+需要认证。
+
+| Query | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `keyword` | string | 是 | 完整邮箱或完整数字账号，不是模糊搜索 |
+
+成功 `data`：`{ id, account, name, avatar, email, gender, birthday, location }`。
+
+### POST `/api/user/name_update`
+
+需要认证。
+
 ```json
-{ "type": "chat", "group_id": 3, "message_type": "text", "content": "大家好" }
+{
+  "name": "新的昵称"
+}
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| type | string | 是 | 固定 `"chat"` |
-| to_user_id | uint | 单聊必填 | 与 group_id 二选一 |
-| group_id | uint | 群聊必填 | 与 to_user_id 二选一 |
-| message_type | string | 是 | `text` / `image` / `video` 等 |
-| content | string | 是 | 消息正文或媒体 URL |
+`name` 不能为空。成功 `data`：`{ id, name }`。
 
----
+### POST `/api/user/avatar_update`
 
-### 接收消息
+需要认证。
 
-**发送回执**（发给发送者）:
+```json
+{
+  "avatar": "avatar_1.png"
+}
+```
+
+该接口只保存 OSS 对象名，不负责上传文件。成功 `data`：`{ id, object_key }`。
+
+### POST `/api/user/password_update`
+
+需要认证。
+
+```json
+{
+  "password": "old-password",
+  "new_password": "new-password"
+}
+```
+
+`new_password` 必须为 8 至 128 字符。成功后 `data=null`。
+
+### POST `/api/user/profile_update`
+
+需要认证。
+
+```json
+{
+  "gender": 1,
+  "birthday": "2000-01-02",
+  "location": "Shanghai"
+}
+```
+
+| 字段 | 类型 | 必填 | 约定 |
+| --- | --- | --- | --- |
+| `gender` | int | 否 | `0` 未知、`1` 男、`2` 女 |
+| `birthday` | string | 否 | 建议使用 `YYYY-MM-DD` |
+| `location` | string | 否 | 地区文本 |
+
+成功 `data`：`{ id, gender, birthday, location }`。
+
+### POST `/api/user/location`
+
+需要认证。经纬度为 JSON 数字，其余字段可为空。
+
+```json
+{
+  "latitude": 31.2304,
+  "longitude": 121.4737,
+  "province": "上海市",
+  "city": "上海市",
+  "district": "黄浦区",
+  "address": "详细地址",
+  "timestamp": 1786900000
+}
+```
+
+该接口按用户覆盖保存最新位置，成功时 `data=null`。
+
+### POST `/api/user/delete`
+
+需要认证，无请求体。软删除当前用户，成功时 `data=null`。
+
+## 5. OSS 与文件上传
+
+### GET `/api/oss/upload-url`
+
+需要认证，生成有效期 1 小时的预签名 PUT URL。
+
+| Query | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `key` | string | 是 | 1 至 180 字符，只允许字母、数字、`.`、`_`、`-`，不能含 `..` |
+| `type` | string | 否 | `avatar`、`chat`、`video`、`feed`；默认 `chat` |
+
+目录映射：`avatar -> avatar/`，`chat/video -> chat/`，`feed -> feed/`。
+
+成功 `data`：
+
+```json
+{
+  "upload_url": "https://...",
+  "access_url": "http://cdn.gelsomino.cn/...",
+  "expires_in": "1小时"
+}
+```
+
+客户端应使用 `PUT <upload_url>` 上传文件内容。
+
+### GET `/api/oss/download-url`
+
+无需认证。
+
+| Query | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `key` | string | 是 | 对象名或完整对象路径 |
+
+以 `avatar_`、`chat_`、`feed_` 开头的对象名会自动补对应目录，其余值原样使用。
+成功 `data`：`{ download_url, expires_in: "1小时" }`。
+
+### POST `/api/chat/upload/image`
+
+需要认证，Content-Type 为 `multipart/form-data`，表单字段名固定为 `file`。
+
+- 最大 10 MB
+- MIME 必须以 `image/` 开头，或为 `application/octet-stream`
+- 对象保存到 `chat/<user_id>/`
+
+成功 `data`：`{ url, content, filename, contentType }`，其中 `content` 与 `url` 相同。
+
+### POST `/api/chat/upload/video`
+
+需要认证，表单字段同图片上传。
+
+- 最大 100 MB
+- MIME 必须以 `video/` 开头，或为 `application/octet-stream`
+
+成功 `data`：`{ url, content, filename, contentType }`。
+
+## 6. 好友接口
+
+### POST `/api/friend/request`
+
+需要认证，`friend_id` 与 `account` 二选一；若两者都传，优先使用 `friend_id`。
+
+```json
+{
+  "account": "friend@example.com"
+}
+```
+
+`account` 支持邮箱或数字账号。不能添加自己、已有好友或重复发送待处理申请。
+
+### GET `/api/friend/requests`
+
+需要认证，返回当前用户收到的申请数组。每项包含 GORM 基础字段
+`ID/CreatedAt/UpdatedAt/DeletedAt`、`sender_id`、`receiver_id`、`status` 和
+`sender` 用户对象。
+
+`status`：`0` 待处理、`1` 已接受、`2` 已拒绝。
+
+### POST `/api/friend/handle`
+
+需要认证，仅申请接收方可操作。
+
+```json
+{
+  "request_id": 1,
+  "status": 1
+}
+```
+
+`status` 仅支持 `1` 接受或 `2` 拒绝。
+
+### GET `/api/friend/list`
+
+需要认证，返回：
+
+```text
+[{ id, user_id, friend_id, account, name, email, avatar,
+   gender, birthday, location, remark }]
+```
+
+### POST `/api/friend/check`
+
+需要认证。
+
+```json
+{
+  "friend_id": 2
+}
+```
+
+成功 `data`：`{ is_friend: true }` 或 `{ is_friend: false }`。
+
+### POST `/api/friend/remark_update`
+
+需要认证，`remark` 可为空以清除备注。
+
+```json
+{
+  "friend_id": 2,
+  "remark": "同学"
+}
+```
+
+### POST `/api/friend/delete`
+
+需要认证，会删除双向好友关系。
+
+```json
+{
+  "friend_id": 2
+}
+```
+
+## 7. 群聊接口
+
+群聊成员变更会轮换 E2EE 群密钥版本，并通过聊天 WebSocket 推送系统事件。
+
+### POST `/api/group/create`
+
+需要认证。`member_ids` 实际必须包含至少一位好友，不能创建只有群主的群聊。
+
+```json
+{
+  "name": "项目群",
+  "avatar": "group.png",
+  "member_ids": [2, 3]
+}
+```
+
+系统去除 `0`、群主 ID 和重复 ID；其余成员必须存在且均为群主好友。
+
+成功 `data`：`{ id, name, avatar, owner_id, member_count, created_at, updated_at }`。
+创建时群主角色为 `owner`，其他成员角色为 `member`，群密钥初始版本为 `1`。
+
+### GET `/api/group/list`
+
+需要认证，返回当前用户所在群聊的详情数组，字段同创建接口。
+
+### GET `/api/group/members`
+
+需要认证，调用者必须是群成员。
+
+| Query | 类型 | 必填 |
+| --- | --- | --- |
+| `group_id` | uint | 是 |
+
+成功 `data`：`[{ user_id, account, name, email, avatar, role }]`。
+
+### POST `/api/group/member/add`
+
+需要认证，调用者必须已经在群内；被邀请者必须是调用者的好友。
+
+```json
+{
+  "group_id": 1,
+  "member_ids": [3, 4]
+}
+```
+
+新增至少一名成员后会轮换群密钥。成功返回更新后的完整群成员数组。
+
+### POST `/api/group/member/remove`
+
+需要认证，仅群主可操作，不能移除群主。
+
+```json
+{
+  "group_id": 1,
+  "member_id": 3
+}
+```
+
+成功后轮换群密钥，并向被移除成员推送 `group_member_removed`。
+
+### POST `/api/group/leave`
+
+需要认证，仅普通成员可以退出；群主必须解散群聊。
+
+```json
+{
+  "group_id": 1
+}
+```
+
+成功后轮换群密钥，并向群主推送 `group_member_left`。
+
+### POST `/api/group/delete`
+
+需要认证，仅群主可解散。
+
+```json
+{
+  "group_id": 1
+}
+```
+
+所有在线成员会收到 `{ "type": "group_dissolved", "group_id": 1 }`。
+
+## 8. E2EE 接口
+
+### 8.1 基本约定
+
+- 身份密钥类型固定为 X25519
+- `public_key` 为 Base64，解码后必须恰好 32 字节
+- 群密钥包装算法固定为 `chacha20poly1305-v1`
+- `wrapped_group_key` 为 Base64，解码后必须大于 16 字节
+- `wrap_nonce` 为 Base64，解码后必须恰好 12 字节
+- 发布群密钥盒时必须恰好覆盖当前所有群成员，不能缺少、重复或包含非成员
+- 创建群聊、成员变更、主动轮换或成员身份公钥变化都会生成新群密钥版本
+
+Base64 接受标准或 URL-safe 形式，可带或不带 padding。
+
+### POST `/api/e2ee/keys/publish`
+
+需要认证，发布或替换自己的身份公钥。
+
+```json
+{
+  "key_type": "x25519",
+  "public_key": "<base64-encoded-32-bytes>"
+}
+```
+
+成功 `data`：`{ user_id, key_type, updated_at }`。公钥真实变化时，用户所在群聊的
+群密钥会自动轮换。
+
+### GET `/api/e2ee/keys/public`
+
+需要认证。
+
+| Query | 类型 | 必填 |
+| --- | --- | --- |
+| `user_id` | uint | 是 |
+
+成功 `data`：`{ user_id, key_type, public_key, updated_at }`。
+
+### GET `/api/e2ee/group/key/current`
+
+需要认证，调用者必须是群成员。
+
+| Query | 类型 | 必填 |
+| --- | --- | --- |
+| `group_id` | uint | 是 |
+
+正常成功 `data`：
+
+```json
+{
+  "group_id": 1,
+  "key_version": 2,
+  "target_user_id": 3,
+  "wrapped_group_key": "<base64>",
+  "wrap_nonce": "<base64>",
+  "wrapped_by_user_id": 1,
+  "key_wrap_alg": "chacha20poly1305-v1"
+}
+```
+
+版本已创建但当前用户没有密钥盒时返回 HTTP 428：
+
+```json
+{
+  "code": 428,
+  "message": "e2ee group key box not found, please upload key boxes",
+  "data": {
+    "group_id": 1,
+    "key_version": 2,
+    "need_publish": true
+  }
+}
+```
+
+### GET `/api/e2ee/group/key/by-version`
+
+需要认证，读取当前用户在指定历史版本中的密钥盒。
+
+| Query | 类型 | 必填 |
+| --- | --- | --- |
+| `group_id` | uint | 是 |
+| `key_version` | int | 是，必须大于 0 |
+
+成功字段与当前密钥接口一致，但该接口当前不返回 `key_wrap_alg`。
+
+### POST `/api/e2ee/group/key/publish`
+
+需要认证，只能发布当前版本，且同一版本只能成功发布一次。
+
+```json
+{
+  "group_id": 1,
+  "key_version": 2,
+  "key_wrap_alg": "chacha20poly1305-v1",
+  "boxes": [
+    {
+      "user_id": 1,
+      "wrapped_group_key": "<base64>",
+      "wrap_nonce": "<base64>"
+    },
+    {
+      "user_id": 2,
+      "wrapped_group_key": "<base64>",
+      "wrap_nonce": "<base64>"
+    }
+  ]
+}
+```
+
+`key_wrap_alg` 省略时默认 `chacha20poly1305-v1`。成功 `data`：
+`{ group_id, key_version, box_count }`。
+
+### POST `/api/e2ee/group/key/rotate`
+
+需要认证，调用者必须是群成员，并通过期望版本执行并发保护。
+
+```json
+{
+  "group_id": 1,
+  "expected_key_version": 2
+}
+```
+
+成功 `data`：`{ group_id, key_version: 3 }`。版本不匹配返回 HTTP 409。
+
+## 9. 聊天 WebSocket
+
+### 9.1 连接
+
+```text
+wss://mini.gelsomino.cn:444/ws/chat?client=foreground
+```
+
+| Query | 可选值 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `client` | `foreground`、`background` | `foreground` | 前台连接会拉取离线消息；后台连接不会 |
+| `token` | Access Token | 无 | 未使用 Authorization Header 时可传 |
+
+连接成功：
+
+```json
+{
+  "type": "connected",
+  "user_id": 1
+}
+```
+
+应用层心跳请求 `{ "type": "ping" }`，响应 `{ "type": "pong" }`。
+
+### 9.2 E2EE 单聊消息
+
+除 `message_type=call` 或 `message_type=video` 外，服务端要求消息 `content` 是合法
+E2EE 信封的 JSON 字符串。直接发送普通明文会返回 `端到端加密消息格式无效`。
+
+外层消息：
+
+```json
+{
+  "type": "chat",
+  "to_user_id": 2,
+  "message_type": "text",
+  "content": "{\"e2ee\":1,\"v\":\"x25519+chacha20poly1305:v1\",...}",
+  "client_message_id": "client-uuid"
+}
+```
+
+单聊 E2EE 信封：
+
+```json
+{
+  "e2ee": 1,
+  "v": "x25519+chacha20poly1305:v1",
+  "key_id": "16位小写十六进制字符串",
+  "sender_key_id": "发送方公钥SHA-256，64位小写十六进制",
+  "recipient_key_id": "接收方公钥SHA-256，64位小写十六进制",
+  "nonce": "<base64-encoded-12-bytes>",
+  "ct": "<base64-ciphertext-longer-than-16-bytes>"
+}
+```
+
+发送方收到：
+
 ```json
 {
   "type": "sent",
   "message": {
-    "id": "...", "conversation_type": "single",
-    "from_user_id": 8, "to_user_id": 9,
-    "message_type": "text", "content": "你好", "created_at": "..."
-  }
+    "id": "...",
+    "conversation_type": "single",
+    "from_user_id": 1,
+    "to_user_id": 2,
+    "group_id": 0,
+    "message_type": "text",
+    "content": "...",
+    "created_at": "..."
+  },
+  "client_message_id": "client-uuid"
 }
 ```
 
-**消息投递**（发给接收者）:
+接收方收到 `type=chat` 和相同 `message`；补发的离线消息还包含 `offline=true`。
+
+### 9.3 E2EE 群聊消息
+
+外层使用 `group_id` 替换 `to_user_id`。当前群密钥盒必须已完整发布。
+
 ```json
 {
-  "type": "chat",
-  "message": { ... },
-  "offline": false
+  "e2ee": 1,
+  "v": "group+chacha20poly1305:v1",
+  "scope": "group",
+  "group_id": 1,
+  "key_version": 2,
+  "sender_key_id": "发送方公钥SHA-256",
+  "nonce": "<base64-encoded-12-bytes>",
+  "ct": "<base64-ciphertext-longer-than-16-bytes>"
 }
 ```
 
-`offline: true` 表示这是离线期间缓存的消息。
+版本不是当前版本时返回 `群聊密钥版本已更新，请重新加密后重试`；密钥盒未覆盖全员时
+返回 `群聊当前密钥尚未完成全员分发，请稍后重试`。
 
-**群聊解散**（系统推送）:
-```json
-{ "type": "group_dissolved", "group_id": 3 }
-```
+### 9.4 已读与撤回
 
----
+单聊已读：
 
-### 被踢下线（系统推送）
-
-```json
-{ "type": "kicked", "reason": "账号在其他设备登录" }
-```
-
-收到后应：清除本地 token → 提示用户 → 跳转登录页。
-
----
-
-### 错误
-
-```json
-{ "type": "error", "error": "错误描述" }
-```
-
-常见: `只能给好友发送消息` `消息内容不能为空` `接收方或群聊不能为空`
-
-WebSocket 连接失败 401: 除 token 过期外，也可能是 session 失效（`"账号在其他设备登录，请重新登录"`）。
-
----
-
-## 六、WebSocket 在线状态
-
-### 连接
-
-```
-wss://api.gelsomino.cn:443/ws/online
-```
-
-认证同聊天 WS。连接成功收到 `{ "type": "connected", "user_id": N }`。心跳机制同上。
-
----
-
-### 查询
-
-**查单个**:
-```json
-{ "type": "check_online", "user_id": 9 }
-```
-→ `{ "type": "online_status", "user_id": 9, "online": true }`
-
-**查多个**:
-```json
-{ "type": "check_online", "user_ids": [9, 10] }
-```
-→ `{ "type": "online_status", "statuses": [{ "user_id": 9, "online": true }, ...] }`
-
-> `user_id` 和 `user_ids` 至少传一个。在线状态基于用户是否持有有效聊天 WS 连接。
-
----
-
-## 七、E2EE 端到端加密
-
-算法: X25519 + ChaCha20-Poly1305。
-
-### POST /api/e2ee/keys/publish  🔒
-
-发布个人公钥。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| key_type | string | 是 | 仅 `"x25519"` |
-| public_key | string | 是 | Base64，解码后 32 字节 |
-
-**返回** `{ user_id, key_type, updated_at }`
-
----
-
-### GET /api/e2ee/keys/public  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| user_id | uint | 是（query） |
-
-**返回** `{ user_id, key_type, public_key, updated_at }`
-
----
-
-### GET /api/e2ee/group/key/current  🔒
-
-获取当前群密钥盒子。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| group_id | uint | 是（query） |
-
-**正常返回** `{ group_id, key_version, target_user_id, wrapped_group_key, wrap_nonce, wrapped_by_user_id }`，若 `key_wrap_alg` 非空则一并返回。
-
-**若未上传密钥盒子 → 428** + `{ group_id, key_version, need_publish: true }`，提示前端调用发布接口。
-
----
-
-### POST /api/e2ee/group/key/publish  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| group_id | uint | 是 | |
-| key_version | int | 是 | 必须等于当前版本号 |
-| key_wrap_alg | string | 否 | 默认 `"chacha20poly1305-v1"` |
-| boxes | []object | 是 | 见下 |
-
-**boxes 元素**:
-
-| 字段 | 类型 | 必填 |
-|------|------|------|
-| user_id | uint | 是 |
-| wrapped_group_key | string | 是 |
-| wrap_nonce | string | 是 |
-
-**返回** `{ group_id, key_version, box_count }`
-
----
-
-### GET /api/e2ee/group/key/by-version  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| group_id | uint | 是（query） |
-| key_version | int | 是（query） |
-
-**返回** `{ group_id, key_version, target_user_id, wrapped_group_key, wrap_nonce, wrapped_by_user_id }`
-
----
-
-## 八、RTC 实时通话
-
-RTC 相关 WebSocket 推送事件（通过聊天 WS 通道下发）：
-
-| 事件类型 | 方向 | 说明 |
-|---------|------|------|
-| `rtc_invite` | 服务端→被叫 | 来电邀请，含 `call_id`、`room_id`、`call_type`、`from_user_id`、`from_name`、`avatar` |
-| `rtc_accept` | 服务端→主叫 | 对方已接听 |
-| `rtc_reject` | 服务端→主叫 | 对方已拒绝 |
-| `rtc_busy` | 服务端→主叫 | 对方忙线 |
-| `rtc_cancel` | 服务端→被叫 | 主叫取消 |
-| `rtc_hangup` | 服务端→对方 | 通话挂断 |
-| `rtc_timeout` | 服务端→双方 | 45s 超时未接听 |
-
----
-
-### POST /api/rtc/call/invite  🔒
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| call_type | string | 是 | `"voice"` / `"video"` |
-| peer_id | uint | 单聊必填 | 与 group_id 二选一 |
-| group_id | uint | 群聊必填 | 与 peer_id 二选一 |
-
-**返回** `{ call_id, room_id, call_type, peer_id, group_id }`
-
-> 单聊需对方在线且为好友，群聊需至少一个在线成员。45s 内无人接听自动超时。
-
----
-
-### POST /api/rtc/call/accept  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| call_id | string | 是 |
-
-**返回** `{ call_id, room_id }`
-
----
-
-### POST /api/rtc/call/reject  🔒
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| call_id | string | 是 |
-| reason | string | 否 |
-
----
-
-### POST /api/rtc/call/cancel  🔒
-
-主叫方在对方接听前取消。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| call_id | string | 是 |
-
----
-
-### POST /api/rtc/call/hangup  🔒
-
-通话中任意一方挂断。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| call_id | string | 是 |
-
-> 未接通前主叫方请使用 cancel 接口。
-
----
-
-### POST /api/rtc/token  🔒
-
-获取 RTC 房间 Token。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| call_id | string | 是 | |
-| call_type | string | 是 | `"voice"` / `"video"` |
-| room_id | string | 否 | |
-| peer_id | uint | 否 | |
-| group_id | uint | 否 | |
-
-**返回** `{ url, room_id, uid, token }`
-
-其中 `url` 为客户端连接 LiveKit 房间的服务地址，`token` 为仅允许当前用户加入本次通话房间的短期 JWT。
-
----
-
-## 九、朋友圈/动态 🔒
-
-> 所有接口均需认证。支持发布文字、图片、视频动态，点赞（Toggle）和评论（含回复）。
-
-### 数据模型
-
-**Post 动态**:
 ```json
 {
-  "id": 1, "user_id": 24, "content": "文字内容",
-  "like_count": 5, "comment_count": 3,
-  "created_at": "2026-05-31T08:56:50+08:00",
-  "author": { "id": 24, "name": "未命名用户", "avatar": "..." },
-  "media": [
-    { "id": 1, "media_type": 1, "media_url": "https://cdn.gelsomino.cn/xxx.jpg", "sort_order": 0 }
+  "type": "mark_read",
+  "to_user_id": 1
+}
+```
+
+对端收到：
+
+```json
+{
+  "type": "read_ack",
+  "reader_id": 2,
+  "peer_id": 1
+}
+```
+
+群聊已读使用 `group_id`。撤回仅允许原发送者在消息发出后 1 分钟内操作：
+
+```json
+{
+  "type": "recall",
+  "to_user_id": 2,
+  "message_id": "服务端消息ID"
+}
+```
+
+接收方收到 `{ "type": "message_recalled", "message_id": "...", "from_user": 1 }`。
+群消息撤回改传 `group_id`。
+
+### 9.5 系统事件与错误
+
+常见系统事件：
+
+| `type` | 说明 |
+| --- | --- |
+| `friend_request` | 收到好友申请 |
+| `friend_accepted` | 好友申请被接受 |
+| `group_member_added` | 被加入群聊 |
+| `group_member_removed` | 被移出群聊 |
+| `group_member_left` | 群成员退出，通知群主 |
+| `group_dissolved` | 群聊解散 |
+| `e2ee_group_key_changed` | 群密钥版本变化 |
+| `kicked` | 新登录导致当前会话失效 |
+| `rtc_*` | RTC 通话信令，见 RTC 章节 |
+
+业务错误使用 `{ "type": "error", "error": "错误说明", "client_message_id": "..." }`。
+
+## 10. 在线状态 WebSocket
+
+连接地址：
+
+```text
+wss://mini.gelsomino.cn:444/ws/online
+```
+
+认证方式同聊天 WebSocket。连接成功和应用层 ping/pong 格式也相同。
+
+查询单个用户：
+
+```json
+{
+  "type": "check_online",
+  "user_id": 2
+}
+```
+
+响应：`{ "type": "online_status", "user_id": 2, "online": true }`。
+
+查询多个用户：
+
+```json
+{
+  "type": "check_online",
+  "user_ids": [2, 3]
+}
+```
+
+响应：
+
+```json
+{
+  "type": "online_status",
+  "statuses": [
+    { "user_id": 2, "online": true },
+    { "user_id": 3, "online": false }
   ]
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| media_type | int | 1=图片 2=视频 |
-| sort_order | int | 排序，小的在前 |
+在线状态依据用户是否持有聊天 WebSocket 连接，而不是 `/ws/online` 连接本身。
 
----
+## 11. RTC 通话接口
 
-### POST /api/feed/create  🔒
+RTC 呼叫状态保存在后端进程内存中；后端重启后未结束的 `call_id` 不再有效。被叫必须
+保持聊天 WebSocket 在线才能收到邀请。单聊要求双方为好友，群聊要求发起者为群成员且
+至少有一名其他成员在线。
 
-发布动态。
+### POST `/api/rtc/call/invite`
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| content | string | 否 | 文字内容（与 media 至少有一个不为空） |
-| media | []object | 否 | 媒体附件列表 |
+需要认证，`peer_id` 与 `group_id` 必须二选一。
 
-**media 元素**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| media_type | int | 是 | 1=图片 2=视频 |
-| media_url | string | 是 | OSS 上传后的 access_url |
-| sort_order | int | 否 | 排序，默认 0 |
-
-**请求示例**:
 ```json
-// 纯文字
-{ "content": "今天天气真好！" }
-
-// 图文
 {
-  "content": "分享一组照片",
+  "peer_id": 2,
+  "call_type": "video"
+}
+```
+
+`call_type` 仅支持 `voice` 或 `video`。成功 `data`：
+
+```json
+{
+  "call_id": "call_20260817010101001",
+  "room_id": "rtc_room_20260817010101001",
+  "call_type": "video",
+  "peer_id": 2,
+  "group_id": 0
+}
+```
+
+45 秒内无人接听会释放通话并推送 `rtc_timeout`。单聊被叫离线返回 HTTP 409。
+
+被叫收到：
+
+```json
+{
+  "type": "rtc_invite",
+  "call_id": "...",
+  "room_id": "...",
+  "call_type": "video",
+  "from_user_id": 1,
+  "to_user_id": 2,
+  "from_name": "昵称",
+  "avatar": "头像"
+}
+```
+
+群邀请还包含 `group_id`。
+
+### POST `/api/rtc/call/accept`
+
+需要认证，仅受邀用户可操作。
+
+```json
+{
+  "call_id": "call_..."
+}
+```
+
+成功 `data`：`{ call_id, room_id }`，其他参与者收到 `rtc_accept`。
+
+### POST `/api/rtc/call/reject`
+
+需要认证，仅尚未接听的受邀用户可操作。
+
+```json
+{
+  "call_id": "call_...",
+  "reason": "rejected"
+}
+```
+
+`reason=busy` 会向主叫推送 `rtc_busy`，其他值统一为 `rejected` 并推送 `rtc_reject`。
+
+### POST `/api/rtc/call/cancel`
+
+需要认证，仅主叫可在接通前取消。
+
+```json
+{
+  "call_id": "call_..."
+}
+```
+
+被叫收到 `rtc_cancel`。
+
+### POST `/api/rtc/call/hangup`
+
+需要认证，已接通后主叫或已接听参与者可挂断。未接通的主叫必须使用取消接口。
+
+```json
+{
+  "call_id": "call_..."
+}
+```
+
+其他参与者收到 `rtc_hangup`。
+
+### POST `/api/rtc/token`
+
+需要认证，只为当前通话参与者生成 LiveKit Token。
+
+```json
+{
+  "call_id": "call_...",
+  "room_id": "rtc_room_...",
+  "call_type": "video",
+  "peer_id": 2
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `call_id` | 是 | 当前有效通话 ID |
+| `call_type` | 是 | 必须与邀请一致 |
+| `room_id` | 否 | 传入时必须与通话一致 |
+| `peer_id` | 否 | 单聊传入时必须与通话一致 |
+| `group_id` | 否 | 群聊传入时必须与通话一致 |
+
+成功 `data`：`{ url, room_id, uid, token }`，其中 `url` 是 LiveKit WebSocket 地址，
+`uid` 是当前用户数字 ID 的字符串形式。
+
+## 12. 动态接口
+
+动态只对发布者本人及其好友可见。分页 `page` 默认 `1`，`page_size` 默认 `20`；
+`page_size` 小于等于 0 或大于 50 时，查询内部使用 20。
+
+### 12.1 动态数据结构
+
+核心字段：
+
+```json
+{
+  "id": 1,
+  "user_id": 1,
+  "content": "动态内容",
+  "author": {
+    "name": "昵称",
+    "account": "1234567890",
+    "avatar": "avatar.png"
+  },
   "media": [
-    { "media_type": 1, "media_url": "https://cdn.gelsomino.cn/chat/xxx.jpg", "sort_order": 0 },
-    { "media_type": 2, "media_url": "https://cdn.gelsomino.cn/chat/yyy.mp4", "sort_order": 1 }
-  ]
-}
-```
-
-**返回**: 完整 Post 对象（含 author 和 media）。
-
----
-
-### DELETE /api/feed/delete  🔒
-
-删除自己的动态。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| post_id | uint | 是 |
-
-> 非本人动态返回 403。
-
----
-
-### GET /api/feed/detail  🔒
-
-查看动态详情（含点赞用户列表和评论）。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| post_id | uint | 是（query） |
-
-**返回**: 完整 Post 对象，包含 `likes`（点赞用户列表）和 `comments`（最近 3 条评论）。
-
----
-
-### GET /api/feed/list  🔒
-
-朋友圈列表，返回自己 + 所有好友的动态，按发布时间倒序。
-
-| 参数 | 类型 | 必填 | 默认值 |
-|------|------|------|--------|
-| page | int | 否 | 1 |
-| page_size | int | 否 | 20（最大 50） |
-
-**返回**:
-```json
-{
-  "list": [ Post, ... ],
-  "total": 10,
-  "page": 1,
-  "page_size": 20
-}
-```
-
----
-
-### GET /api/feed/my_posts  🔒
-
-查看自己发布的所有动态。
-
-| 参数 | 类型 | 必填 | 默认值 |
-|------|------|------|--------|
-| page | int | 否 | 1 |
-| page_size | int | 否 | 20（最大 50） |
-
-**返回**: 同上分页格式。
-
----
-
-### POST /api/feed/like  🔒
-
-点赞 / 取消点赞（Toggle 模式）。已赞则取消，未赞则点赞。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| post_id | uint | 是 |
-
-**返回**:
-```json
-{ "is_liked": true }   // true=已赞, false=已取消
-```
-
-> `like_count` 自动同步。
-
----
-
-### POST /api/feed/comment  🔒
-
-发表评论或回复他人评论。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| post_id | uint | 是 | |
-| content | string | 是 | 评论内容 |
-| reply_to_id | uint | 否 | 回复某条评论的 ID，传 null 或不传表示直接评论 |
-
-**请求示例**:
-```json
-// 直接评论
-{ "post_id": 1, "content": "写得真不错！" }
-
-// 回复评论
-{ "post_id": 1, "content": "谢谢支持！", "reply_to_id": 1 }
-```
-
-> `comment_count` 自动同步。
-
----
-
-### DELETE /api/feed/comment  🔒
-
-删除自己的评论。
-
-| 参数 | 类型 | 必填 |
-|------|------|------|
-| comment_id | uint | 是 |
-
----
-
-### GET /api/feed/comments  🔒
-
-获取某条动态的评论列表，按时间正序。
-
-| 参数 | 类型 | 必填 | 默认值 |
-|------|------|------|--------|
-| post_id | uint | 是（query） | |
-| page | int | 否 | 1 |
-| page_size | int | 否 | 20（最大 50） |
-
-**返回**:
-```json
-{
-  "list": [
     {
-      "id": 3,
+      "id": 1,
       "post_id": 1,
-      "user_id": 24,
-      "content": "谢谢支持！",
-      "reply_to_id": 1,
-      "created_at": "2026-05-31T08:57:20+08:00",
-      "user": { "id": 24, "name": "未命名用户", "avatar": "" },
-      "reply_to": {
-        "id": 1,
-        "content": "写得真不错！",
-        "user": { "id": 24, "name": "未命名用户", "avatar": "" }
-      }
+      "media_type": 1,
+      "media_url": "https://...",
+      "sort_order": 0
     }
   ],
-  "total": 3,
-  "page": 1,
-  "page_size": 20
+  "like_count": 0,
+  "comment_count": 0,
+  "created_at": "...",
+  "updated_at": "..."
 }
 ```
 
-> `reply_to` 仅在 `reply_to_id` 不为 null 时返回。
+`media_type` 约定：`1` 图片、`2` 视频。
 
----
+### POST `/api/feed/create`
 
-## 附录: 错误码
+需要认证，`content` 和 `media` 至少有一个非空。
 
-### HTTP 状态码
+```json
+{
+  "content": "分享图片",
+  "media": [
+    {
+      "media_type": 1,
+      "media_url": "https://cdn.example/image.jpg",
+      "sort_order": 0
+    }
+  ]
+}
+```
 
-| HTTP | 说明 |
-|------|------|
-| 200 | 成功 |
-| 400 | 参数错误 |
-| 401 | 未授权 |
-| 403 | 权限不足 |
-| 404 | 资源不存在 |
-| 409 | 冲突（如忙线、版本冲突） |
-| 428 | 需上传 E2EE 密钥盒子 |
-| 500 | 服务端错误 |
+成功 `data` 为完整动态对象。
 
-### 业务码
+### DELETE `/api/feed/delete`
 
-| 业务码 | 说明 |
-|--------|------|
-| 400 | 请求参数错误 |
-| 401 | 未授权 |
-| 403 | 禁止访问 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
-| 10001 | 用户已存在 |
-| 10002 | 用户不存在 |
-| 10003 | 密码错误 |
-| 10004 | Token 生成失败 |
-| 10005 | Token 解析失败 |
-| 10006 | Token 已过期 |
+需要认证，仅动态作者可删除。
 
-> 注：业务码 400/401/403/404/500 与 HTTP 状态码含义一致，用于响应 body 中的 `code` 字段。
+```json
+{
+  "post_id": 1
+}
+```
+
+不存在返回 404，非作者返回 403。
+
+### GET `/api/feed/detail`
+
+需要认证。
+
+| Query | 类型 | 必填 |
+| --- | --- | --- |
+| `post_id` | uint | 是 |
+
+成功 `data` 的实际结构是 `{ post: <动态对象>, is_liked: bool }`。评论不嵌入动态详情，
+应通过 `/api/feed/comments` 单独读取。
+
+### GET `/api/feed/list`
+
+需要认证，返回本人及好友的动态，按时间倒序。
+
+| Query | 类型 | 必填 | 默认值 |
+| --- | --- | --- | --- |
+| `page` | int | 否 | `1` |
+| `page_size` | int | 否 | `20` |
+
+成功 `data`：`{ list, total, page, page_size }`。每个列表项包含动态字段和
+`is_liked`。
+
+### GET `/api/feed/my_posts`
+
+需要认证，分页参数与动态列表相同，只返回当前用户的动态。响应结构同动态列表。
+
+### POST `/api/feed/like`
+
+需要认证，为 Toggle 操作：未点赞时点赞，已点赞时取消。
+
+```json
+{
+  "post_id": 1
+}
+```
+
+成功 `data`：`{ is_liked: true }` 或 `{ is_liked: false }`，并同步更新
+`like_count`。
+
+### GET `/api/feed/is_liked`
+
+需要认证。
+
+| Query | 类型 | 必填 |
+| --- | --- | --- |
+| `post_id` | uint | 是 |
+
+成功 `data`：`{ is_liked: bool }`。
+
+### POST `/api/feed/comment`
+
+需要认证。
+
+```json
+{
+  "post_id": 1,
+  "content": "评论内容",
+  "reply_to_id": null
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `post_id` | uint | 是 | 可见动态 ID |
+| `content` | string | 是 | 不能为空 |
+| `reply_to_id` | uint/null | 否 | 被回复评论 ID |
+
+成功 `data` 为新评论对象，并同步更新 `comment_count`。
+
+### DELETE `/api/feed/comment`
+
+需要认证。评论作者或动态作者可删除评论。
+
+```json
+{
+  "comment_id": 1
+}
+```
+
+### GET `/api/feed/comments`
+
+需要认证，调用者必须可见该动态。
+
+| Query | 类型 | 必填 | 默认值 |
+| --- | --- | --- | --- |
+| `post_id` | uint | 是 | 无 |
+| `page` | int | 否 | `1` |
+| `page_size` | int | 否 | `20` |
+
+成功 `data`：`{ list, total, page, page_size }`，评论按创建时间正序。
+
+## 13. 实测说明
+
+2026-08-17 使用三个唯一测试账号在 `https://mini.gelsomino.cn:444` 完成以下闭环：
+
+1. 注册、登录、刷新、用户资料、位置、改密与重新登录。
+2. OSS 上传/下载 URL、图片直传与视频直传。
+3. 好友申请、接受、列表、检查、备注和双向删除。
+4. 群聊创建、列表、成员查询、添加、移除、主动退出和解散。
+5. 身份公钥发布、群密钥 428 恢复流程、密钥盒发布、历史版本读取和主动轮换。
+6. 双端聊天 WebSocket 连接、E2EE 消息、发送回执、投递、已读和撤回。
+7. 在线状态 WebSocket 的连接、心跳和批量查询。
+8. RTC 邀请、接受、Token、挂断、拒绝和取消，并核对对应 WebSocket 事件。
+9. 动态发布、详情、朋友圈、我的动态、点赞状态、评论、删除评论和删除动态。
+10. 解散测试群聊、删除测试好友关系并软删除三个测试账号。
+
+所有 52 个 HTTP 路由和 2 个 WebSocket 入口均通过，公网健康检查为 HTTP 200。

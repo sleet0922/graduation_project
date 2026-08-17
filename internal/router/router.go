@@ -23,6 +23,9 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.Cors())
+	r.Get("/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
 
 	jwtManager := jwt.NewJWTManager(cfg.JWT.SecretKey)
 	jwtMiddleware := middleware.NewJWTMiddleware(jwtManager)

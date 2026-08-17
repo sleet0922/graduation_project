@@ -25,9 +25,9 @@ jwt:
   refresh_token_expire_seconds: 2592000
 
 livekit:
-  url: "wss://eo.gelsomino.cn"
+  url: "wss://mini.gelsomino.cn:444"
   api_key: "devkey"
-  api_secret: "secret"
+  api_secret: "graduation-project-livekit-secret-2026"
   token_expire_seconds: 7200
 
 log:

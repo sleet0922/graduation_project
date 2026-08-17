@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+state_dir=/var/lib/graduation-project
+runtime_env=/etc/graduation-project/runtime.env
+db_role=sleet
+db_name=graduation_project
+
+install -d -m 0750 -o graduation-project -g graduation-project "$state_dir"
+install -d -m 0755 /etc/graduation-project
+
+if [ ! -s "$state_dir/postgres-password" ]; then
+  umask 077
+  od -An -N 24 -tx1 /dev/urandom | tr -d ' \n' > "$state_dir/postgres-password"
+  chown root:graduation-project "$state_dir/postgres-password"
+  chmod 0640 "$state_dir/postgres-password"
+fi
+db_password=$(cat "$state_dir/postgres-password")
+
+for _ in $(seq 1 60); do
+  if runuser -u postgres -- pg_isready -q; then
+    break
+  fi
+  sleep 1
+done
+runuser -u postgres -- pg_isready -q
+
+if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$db_role'" | grep -q 1; then
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d postgres -c "CREATE ROLE $db_role LOGIN PASSWORD '$db_password'"
+else
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d postgres -c "ALTER ROLE $db_role WITH LOGIN PASSWORD '$db_password'"
+fi
+
+if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$db_name'" | grep -q 1; then
+  runuser -u postgres -- createdb -O "$db_role" "$db_name"
+fi
+
+cat > "$runtime_env" <<EOF
+ZAT_DATABASE_PASSWORD=$db_password
+ZAT_DATABASE_AUTO_MIGRATE=true
+EOF
+chown root:graduation-project "$runtime_env"
+chmod 0640 "$runtime_env"
