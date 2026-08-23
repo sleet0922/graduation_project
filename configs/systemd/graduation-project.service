@@ -1,13 +1,11 @@
 [Unit]
 Description=Graduation project Go API
-After=network-online.target postgresql@@POSTGRESQL_VERSION@-main.service redis-server.service
+After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
-Requires=postgresql@@POSTGRESQL_VERSION@-main.service redis-server.service
+Requires=postgresql.service redis-server.service
 
 [Service]
 Type=simple
-User=graduation-project
-Group=graduation-project
 WorkingDirectory=/opt/graduation-project
 EnvironmentFile=/etc/graduation-project/runtime.env
 ExecStart=/usr/local/bin/graduation-project

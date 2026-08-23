@@ -6,8 +6,6 @@ Requires=redis-server.service
 
 [Service]
 Type=simple
-User=livekit
-Group=livekit
 WorkingDirectory=/var/lib/livekit
 ExecStart=/usr/local/bin/livekit-server --config /etc/livekit/livekit.yaml
 Restart=always
