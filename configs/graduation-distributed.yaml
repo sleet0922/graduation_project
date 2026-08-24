@@ -1,0 +1,35 @@
+server:
+  port: ":8081"
+  mode: "release"
+database:
+  username: "sleet"
+  password: "change-me"
+  host: "postgres.bocker"
+  port: 5432
+  dbname: "graduation_project"
+  charset: "utf8mb4"
+  auto_migrate: true
+oss:
+  access_key_id: "test"
+  secret_access_key: "test"
+  bucket: "test"
+  endpoint: "https://s3-cn-east-1.qiniucs.com"
+  base_path: ""
+  cdn_domain: "http://cdn.invalid"
+jwt:
+  secret_key: "0123456789abcdef0123456789abcdef"
+  access_token_expire_seconds: 3600
+  refresh_token_expire_seconds: 7200
+log:
+  level: "info"
+  filename: "logs/app.log"
+livekit:
+  url: "http://livekit.bocker:7880"
+  api_key: "devkey"
+  api_secret: "graduation-project-livekit-secret-2026"
+  token_expire_seconds: 7200
+redis:
+  addr: "livekit.bocker"
+  port: 6379
+  password: ""
+  db: 0

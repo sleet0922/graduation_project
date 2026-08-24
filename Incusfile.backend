@@ -1,0 +1,49 @@
+version: 2
+args: {GO_VERSION: "1.26.6"}
+mirror: china
+name: graduation-backend
+network: nat
+stages:
+  - name: builder
+    from: debian/13
+    workdir: /src
+    env: {CGO_ENABLED: "0"}
+    packages: [ca-certificates]
+    tools: {go: "${GO_VERSION}"}
+    files: {/src/: [go.mod, go.sum], /src/cmd/: [cmd], /src/internal/: [internal], /src/pkg/: [pkg]}
+    commands:
+      - [go, mod, download]
+      - [go, build, -trimpath, "-ldflags=-s -w", -o, /out/graduation-project, ./cmd/api]
+  - from: debian/13
+    packages: [ca-certificates]
+    files: {/opt/graduation-project/configs/config.yaml: [configs/graduation-distributed.yaml]}
+    commands:
+      - shell: |
+          rm -f /etc/resolv.conf
+          printf 'nameserver 10.0.100.1\nsearch bocker\n' >/etc/resolv.conf
+      - shell: |
+          set -eu
+          mkdir -p /opt/graduation-project/logs /etc/graduation-project
+          cat >/etc/systemd/system/graduation-project.service <<'EOF'
+          [Unit]
+          Description=Graduation project Go API
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/graduation-project
+          EnvironmentFile=/etc/graduation-project/runtime.env
+          ExecStart=/usr/local/bin/graduation-project
+          Restart=always
+          RestartSec=3
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          printf 'ZAT_DATABASE_PASSWORD=graduation-test-db-password\nZAT_DATABASE_AUTO_MIGRATE=true\n' >/etc/graduation-project/runtime.env
+          chmod 0600 /etc/graduation-project/runtime.env
+          systemctl enable graduation-project.service
+    artifacts: {builder: {/out/graduation-project: /usr/local/bin/graduation-project}}
+    runtime:
+      expose: [8081]
+      domain: graduation-backend.test
+      autostart: true

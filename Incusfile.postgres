@@ -1,0 +1,23 @@
+version: 2
+name: graduation-postgres
+network: nat
+stages:
+  - from: debian/13
+    packages: [ca-certificates, postgresql]
+    commands:
+      - shell: |
+          rm -f /etc/resolv.conf
+          printf 'nameserver 10.0.100.1\nsearch bocker\n' >/etc/resolv.conf
+      - shell: |
+          set -eu
+          pg_version="$(ls /etc/postgresql | sort -V | tail -1)"
+          sed -i "s/^#listen_addresses =.*/listen_addresses = '*' /" "/etc/postgresql/$pg_version/main/postgresql.conf"
+          printf 'host all all 0.0.0.0/0 scram-sha-256\nhost all all ::/0 scram-sha-256\n' >> "/etc/postgresql/$pg_version/main/pg_hba.conf"
+          systemctl start postgresql.service
+          runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d postgres -c "CREATE ROLE sleet LOGIN PASSWORD 'graduation-test-db-password'"
+          runuser -u postgres -- createdb -O sleet graduation_project
+          systemctl stop postgresql.service
+          systemctl enable postgresql.service
+    runtime:
+      expose: [5432]
+      autostart: true
