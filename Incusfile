@@ -42,4 +42,5 @@ stages:
           systemctl enable postgresql.service redis-server.service graduation-project.service livekit.service caddy.service
     runtime:
       expose: [81, 444, 444/udp, 7881, 7882/udp]
+      domain: graduation-project.test
       autostart: true
