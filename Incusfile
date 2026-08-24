@@ -11,7 +11,12 @@ stages:
     packages: [ca-certificates, wget]
     tools: {go: "${GO_VERSION}"}
     files: {/src/: [go.mod, go.sum], /src/cmd/: [cmd], /src/internal/: [internal], /src/pkg/: [pkg]}
-    fetch: [{url: "https://github.com/livekit/livekit/releases/download/v${LIVEKIT_VERSION}/livekit_${LIVEKIT_VERSION}_linux_amd64.tar.gz", extract: /out, format: tar.gz}]
+    fetch:
+      - url: "https://github.com/livekit/livekit/releases/download/v${LIVEKIT_VERSION}/livekit_${LIVEKIT_VERSION}_linux_amd64.tar.gz"
+        extract: /out
+        format: tar.gz
+        timeout: 120
+        tries: 3
     commands:
       - [mkdir, -p, /out]
       - [go, mod, download]
