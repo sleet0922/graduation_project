@@ -1,15 +1,13 @@
 version: 2
-args: {GO_VERSION: "1.26.6"}
 mirror: china
 name: graduation-project
 network: nat
 stages:
   - name: builder
-    from: debian/13
+    from: alpine:3.24
     workdir: /src
-    env: {CGO_ENABLED: "0"}
-    packages: [ca-certificates, wget]
-    tools: {go: "${GO_VERSION}"}
+    env: {CGO_ENABLED: "0", GOPROXY: "https://goproxy.cn,direct", GOSUMDB: "sum.golang.google.cn"}
+    packages: [ca-certificates, wget, go]
     files: {/src/: [go.mod, go.sum], /src/cmd/: [cmd], /src/internal/: [internal], /src/pkg/: [pkg]}
     fetch:
       - url: "https://gitee.com/sleet0922/cloud_disk/releases/download/v1.0/livekit_1.13.5_linux_amd64.tar.gz"
@@ -22,30 +20,19 @@ stages:
       - [go, mod, download]
       - [go, build, -trimpath, "-ldflags=-s -w", -o, /out/graduation-project, ./cmd/api]
       - [chmod, "0755", /out/graduation-project, /out/livekit-server]
-  - from: debian/13
-    packages: [ca-certificates, openssl, postgresql, redis-server, caddy]
+  - from: alpine:3.24
+    packages: [ca-certificates, openssl, postgresql17, redis, caddy, gcompat]
     workdir: /opt/graduation-project
     artifacts: {builder: {/out/graduation-project: /usr/local/bin/graduation-project, /out/livekit-server: /usr/local/bin/livekit-server}}
-    files: {/opt/graduation-project/configs/: [configs/config.yaml], /etc/livekit/: [configs/livekit.yaml], /etc/systemd/system/: [configs/systemd], /etc/caddy/: [configs/Caddyfile], /etc/caddy/certs/: [ssl]}
+    files: {/opt/graduation-project/configs/: [configs/config.yaml], /etc/livekit/: [configs/livekit.yaml], /etc/caddy/: [configs/Caddyfile], /etc/caddy/certs/: [ssl], /usr/local/bin/: [start-alpine.sh]}
     commands:
       - shell: |
           set -eu
           mkdir -p /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project
-          chmod 0755 /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /usr/local/bin/graduation-project /usr/local/bin/livekit-server
-          chown root:caddy /etc/caddy/certs/1.pem /etc/caddy/certs/1.key
+          chmod 0755 /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /usr/local/bin/graduation-project /usr/local/bin/livekit-server /usr/local/bin/start-alpine.sh
           chmod 0644 /etc/caddy/certs/1.pem; chmod 0640 /etc/caddy/certs/1.key
-      - run: [openssl, rand, -hex, "24"]
-        capture: DB_PASSWORD
-      - shell: |
-          set -eu
-          systemctl start postgresql.service
-          runuser -u postgres -- psql -v ON_ERROR_STOP=1 -d postgres -c "CREATE ROLE sleet LOGIN PASSWORD '$DB_PASSWORD'"
-          runuser -u postgres -- createdb -O sleet graduation_project
-          printf 'ZAT_DATABASE_PASSWORD=%s\nZAT_DATABASE_AUTO_MIGRATE=true\n' "$DB_PASSWORD" > /etc/graduation-project/runtime.env
-          chmod 0600 /etc/graduation-project/runtime.env
-          systemctl stop postgresql.service
-          systemctl enable postgresql.service redis-server.service graduation-project.service livekit.service caddy.service
     runtime:
+      entrypoint: [/usr/local/bin/start-alpine.sh]
       expose: [81, 444, 444/udp, 7881, 7882/udp]
       domain: graduation-project.test
       autostart: true
