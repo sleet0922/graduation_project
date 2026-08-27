@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+
+name="graduation-project API"
+command="/usr/local/bin/graduation-project"
+command_background="yes"
+pidfile="/run/$RC_SVCNAME.pid"
+directory="/opt/graduation-project"
+output_log="/var/log/graduation-project/app.log"
+error_log="/var/log/graduation-project/app.log"
+
+depend() {
+	need net postgresql redis graduation-db-init
+	after livekit
+}
+
+start_pre() {
+	export ZAT_DATABASE_PASSWORD='Zyz20050922!'
+	export ZAT_DATABASE_AUTO_MIGRATE=true
+	checkpath -d -m 0755 /var/log/graduation-project /opt/graduation-project/logs
+}

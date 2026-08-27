@@ -24,15 +24,20 @@ stages:
     packages: [ca-certificates, openssl, postgresql17, redis, caddy, gcompat]
     workdir: /opt/graduation-project
     artifacts: {builder: {/out/graduation-project: /usr/local/bin/graduation-project, /out/livekit-server: /usr/local/bin/livekit-server}}
-    files: {/opt/graduation-project/configs/: [configs/config.yaml], /etc/livekit/: [configs/livekit.yaml], /etc/caddy/: [configs/Caddyfile], /etc/caddy/certs/: [ssl], /usr/local/bin/: [start-alpine.sh]}
+    files: {/opt/graduation-project/configs/: [configs/config.yaml], /etc/livekit/: [configs/livekit.yaml], /etc/caddy/: [configs/Caddyfile], /etc/caddy/certs/: [ssl], /etc/init.d/: [configs/openrc/graduation-db-init, configs/openrc/livekit, configs/openrc/graduation-project]}
     commands:
       - shell: |
           set -eu
           mkdir -p /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project
-          chmod 0755 /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /usr/local/bin/graduation-project /usr/local/bin/livekit-server /usr/local/bin/start-alpine.sh
+          chmod 0755 /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /usr/local/bin/graduation-project /usr/local/bin/livekit-server /etc/init.d/graduation-db-init /etc/init.d/livekit /etc/init.d/graduation-project
           chmod 0644 /etc/caddy/certs/1.pem; chmod 0640 /etc/caddy/certs/1.key
+          rc-update add postgresql default
+          rc-update add redis default
+          rc-update add livekit default
+          rc-update add graduation-db-init default
+          rc-update add graduation-project default
+          rc-update add caddy default
     runtime:
-      entrypoint: [/usr/local/bin/start-alpine.sh]
       expose: [81, 444, 444/udp, 7881, 7882/udp]
       domain: graduation-project.test
       autostart: true

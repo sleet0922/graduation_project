@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+name="LiveKit server"
+command="/usr/local/bin/livekit-server"
+command_args="--config /etc/livekit/livekit.yaml"
+command_background="yes"
+pidfile="/run/$RC_SVCNAME.pid"
+output_log="/var/log/livekit.log"
+error_log="/var/log/livekit.log"
+
+depend() {
+	need net localmount
+	after firewall
+}

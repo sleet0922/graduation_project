@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+
+name="graduation-project database initialization"
+
+depend() {
+	need postgresql
+}
+
+start() {
+	ebegin "Configuring graduation-project PostgreSQL role and database"
+	local password='Zyz20050922!'
+	if ! su postgres -c "psql -d postgres -tAc \"SELECT 1 FROM pg_roles WHERE rolname='sleet'\"" | grep -q 1; then
+		su postgres -c "psql -v ON_ERROR_STOP=1 -d postgres -c \"CREATE ROLE sleet LOGIN PASSWORD '$password'\"" || { eend 1; return 1; }
+	else
+		su postgres -c "psql -v ON_ERROR_STOP=1 -d postgres -c \"ALTER ROLE sleet WITH LOGIN PASSWORD '$password'\"" || { eend 1; return 1; }
+	fi
+	if ! su postgres -c "psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='graduation_project'\"" | grep -q 1; then
+		su postgres -c "createdb -O sleet graduation_project" || { eend 1; return 1; }
+	fi
+	eend 0
+}

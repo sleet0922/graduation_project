@@ -22,3 +22,12 @@ nohup.out
 app.log
 .codex
 logs/app.log
+
+# Python E2E test artifacts
+__pycache__/
+*.py[cod]
+.e2e-venv/
+
+# Local build and runtime logs
+logs/
+*.log
