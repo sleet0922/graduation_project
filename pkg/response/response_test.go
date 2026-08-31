@@ -65,7 +65,7 @@ func TestResponseHelpers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("app.Test failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != tt.wantHTTPStatus {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.wantHTTPStatus)

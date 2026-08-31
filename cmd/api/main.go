@@ -1,23 +1,26 @@
 package main
 
 import (
-	"log/slog"
-	"sleet0922/graduation_project/internal/config"
-	"sleet0922/graduation_project/internal/db"
-	"sleet0922/graduation_project/internal/router"
-	"sleet0922/graduation_project/pkg/logger"
-	"sleet0922/graduation_project/pkg/redis"
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"sleet0922/graduation_project/internal/app"
 )
 
 func main() {
-	cfg := config.InitConfig()
-	logger.InitLogger(cfg)
-	database := db.InitDB(cfg)
-	redis.InitRedis(cfg)
-	r := router.InitRouter(database, cfg)
-	logger.Info("服务器启动", slog.String("port", cfg.Server.Port))
-	err := r.Listen(cfg.Server.Port)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	application, err := app.Bootstrap(ctx, app.Options{})
 	if err != nil {
-		logger.Fatal("启动服务器失败", slog.Any("error", err))
+		_, _ = fmt.Fprintf(os.Stderr, "application bootstrap failed: %v\n", err)
+		os.Exit(1)
+	}
+	if err := application.Run(ctx); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "application stopped with error: %v\n", err)
+		os.Exit(1)
 	}
 }

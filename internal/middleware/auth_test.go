@@ -14,17 +14,19 @@ import (
 	redisPkg "sleet0922/graduation_project/pkg/redis"
 )
 
-func setupMiniRedis(t *testing.T) *miniredis.Miniredis {
+func setupMiniRedis(t *testing.T) (*miniredis.Miniredis, redisPkg.SessionStore) {
 	t.Helper()
 	server := miniredis.RunT(t)
-	oldClient := redisPkg.RedisClient
-	redisPkg.RedisClient = goredis.NewClient(&goredis.Options{Addr: server.Addr()})
+	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
 	t.Cleanup(func() {
-		redisPkg.RedisClient.Close()
-		redisPkg.RedisClient = oldClient
+		_ = client.Close()
 		server.Close()
 	})
-	return server
+	store, err := redisPkg.NewSessionStore(client)
+	if err != nil {
+		t.Fatalf("NewSessionStore failed: %v", err)
+	}
+	return server, store
 }
 
 func authTestResponse(t *testing.T, app *fiber.App, path string, token string) (int, map[string]any) {
@@ -37,7 +39,7 @@ func authTestResponse(t *testing.T, app *fiber.App, path string, token string) (
 	if err != nil {
 		t.Fatalf("app.Test failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response failed: %v", err)
@@ -46,9 +48,12 @@ func authTestResponse(t *testing.T, app *fiber.App, path string, token string) (
 }
 
 func TestJWTMiddlewareAuth(t *testing.T) {
-	setupMiniRedis(t)
+	_, store := setupMiniRedis(t)
 	manager := jwt.NewJWTManager("secret")
-	middleware := NewJWTMiddleware(manager)
+	middleware, err := NewJWTMiddleware(manager, store)
+	if err != nil {
+		t.Fatalf("NewJWTMiddleware failed: %v", err)
+	}
 	app := fiber.New()
 	app.Get("/protected", middleware.Auth(), func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
@@ -81,7 +86,7 @@ func TestJWTMiddlewareAuth(t *testing.T) {
 		t.Fatalf("invalid session response = status %d payload %#v", status, payload)
 	}
 
-	if _, err := redisPkg.SetUserSession(1, "s1", time.Hour); err != nil {
+	if _, err := store.SetUserSession(1, "s1", time.Hour); err != nil {
 		t.Fatalf("SetUserSession failed: %v", err)
 	}
 	status, payload = authTestResponse(t, app, "/protected", accessToken)
@@ -90,24 +95,38 @@ func TestJWTMiddlewareAuth(t *testing.T) {
 	}
 }
 
-func TestJWTMiddlewareAcceptsQueryToken(t *testing.T) {
-	setupMiniRedis(t)
+func TestJWTMiddlewareRejectsQueryToken(t *testing.T) {
+	_, store := setupMiniRedis(t)
 	manager := jwt.NewJWTManager("secret")
 	token, err := manager.GenerateTokenWithSession(2, "query", jwt.TokenTypeAccess, "session-query", time.Hour)
 	if err != nil {
 		t.Fatalf("GenerateTokenWithSession failed: %v", err)
 	}
-	if _, err := redisPkg.SetUserSession(2, "session-query", time.Hour); err != nil {
+	if _, err := store.SetUserSession(2, "session-query", time.Hour); err != nil {
 		t.Fatalf("SetUserSession failed: %v", err)
 	}
 
 	app := fiber.New()
-	app.Get("/protected", NewJWTMiddleware(manager).Auth(), func(c *fiber.Ctx) error {
+	middleware, err := NewJWTMiddleware(manager, store)
+	if err != nil {
+		t.Fatalf("NewJWTMiddleware failed: %v", err)
+	}
+	app.Get("/protected", middleware.Auth(), func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"user_id": c.Locals("user_id")})
 	})
 
 	status, payload := authTestResponse(t, app, "/protected?token="+token, "")
-	if status != fiber.StatusOK || payload["user_id"].(float64) != 2 {
-		t.Fatalf("query token response = status %d payload %#v", status, payload)
+	if status != fiber.StatusUnauthorized || payload["message"] != "缺少认证信息" {
+		t.Fatalf("query token response = status %d payload %#v, want unauthorized", status, payload)
+	}
+}
+
+func TestJWTMiddlewareRejectsMissingDependencies(t *testing.T) {
+	if _, err := NewJWTMiddleware(nil, nil); err == nil {
+		t.Fatal("NewJWTMiddleware accepted nil JWT manager and session store")
+	}
+	manager := jwt.NewJWTManager("secret")
+	if _, err := NewJWTMiddleware(manager, nil); err == nil {
+		t.Fatal("NewJWTMiddleware accepted missing session store")
 	}
 }

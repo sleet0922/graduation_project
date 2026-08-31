@@ -2,6 +2,8 @@ package repo
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sleet0922/graduation_project/internal/model"
 
 	"gorm.io/gorm"
@@ -26,6 +28,7 @@ type FeedRepository interface {
 	// 点赞
 	CreateLike(ctx context.Context, like *model.FeedLike) (int64, error)     // 返回受影响行数
 	DeleteLike(ctx context.Context, postID uint, userID uint) (int64, error) // 返回受影响行数
+	ToggleLike(ctx context.Context, userID uint, postID uint) (bool, error)
 	IsLiked(ctx context.Context, postID uint, userID uint) (bool, error)
 	IncrementLikeCount(ctx context.Context, postID uint) error
 	DecrementLikeCount(ctx context.Context, postID uint) error
@@ -33,10 +36,13 @@ type FeedRepository interface {
 
 	// 评论
 	CreateComment(ctx context.Context, comment *model.FeedComment) error
+	CreateCommentWithCount(ctx context.Context, comment *model.FeedComment) error
 	GetCommentByID(ctx context.Context, commentID uint) (*model.FeedComment, error)
 	DeleteComment(ctx context.Context, commentID uint, userID uint) (uint, bool, error)
+	DeleteCommentWithCount(ctx context.Context, commentID uint, userID uint) (uint, bool, error)
 	// ForceDeleteComment 不校验 user_id（帖子作者删他人评论使用）
 	ForceDeleteComment(ctx context.Context, commentID uint) (uint, bool, error)
+	ForceDeleteCommentWithCount(ctx context.Context, commentID uint) (uint, bool, error)
 	ListComments(ctx context.Context, postID uint, offset, limit int) ([]model.FeedComment, int64, error)
 	IncrementCommentCount(ctx context.Context, postID uint) error
 	DecrementCommentCount(ctx context.Context, postID uint) error
@@ -189,6 +195,73 @@ func (r *feedRepository) DeleteLike(ctx context.Context, postID uint, userID uin
 	return result.RowsAffected, result.Error
 }
 
+// ToggleLike performs the read, mutation, and denormalized counter update in
+// one transaction. Locking the parent post is intentional: a missing
+// feed_like row cannot itself be locked, so locking the stable parent row is
+// what serializes concurrent toggles for the same post.
+func (r *feedRepository) ToggleLike(ctx context.Context, userID uint, postID uint) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, errors.New("feed repository database is nil")
+	}
+	var liked bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var post model.FeedPost
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL", postID).
+			First(&post).Error; err != nil {
+			return err
+		}
+
+		var like model.FeedLike
+		findErr := tx.Where("post_id = ? AND user_id = ?", postID, userID).First(&like).Error
+		switch {
+		case errors.Is(findErr, gorm.ErrRecordNotFound):
+			result := tx.Create(&model.FeedLike{PostID: postID, UserID: userID})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("create like affected %d rows", result.RowsAffected)
+			}
+			updated := tx.Model(&model.FeedPost{}).
+				Where("id = ? AND deleted_at IS NULL", postID).
+				UpdateColumn("like_count", gorm.Expr("like_count + 1"))
+			if updated.Error != nil {
+				return fmt.Errorf("increase like count: %w", updated.Error)
+			}
+			if updated.RowsAffected != 1 {
+				return fmt.Errorf("increase like count affected %d rows", updated.RowsAffected)
+			}
+			liked = true
+		case findErr != nil:
+			return findErr
+		default:
+			result := tx.Delete(&like)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("delete like affected %d rows", result.RowsAffected)
+			}
+			updated := tx.Model(&model.FeedPost{}).
+				Where("id = ? AND deleted_at IS NULL AND like_count > 0", postID).
+				UpdateColumn("like_count", gorm.Expr("like_count - 1"))
+			if updated.Error != nil {
+				return fmt.Errorf("decrease like count: %w", updated.Error)
+			}
+			if updated.RowsAffected != 1 {
+				return fmt.Errorf("decrease like count affected %d rows", updated.RowsAffected)
+			}
+			liked = false
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return liked, nil
+}
+
 // IsLiked 查询当前用户是否已点赞某帖子
 func (r *feedRepository) IsLiked(ctx context.Context, postID uint, userID uint) (bool, error) {
 	var count int64
@@ -238,6 +311,38 @@ func (r *feedRepository) CreateComment(ctx context.Context, comment *model.FeedC
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
+// CreateCommentWithCount atomically creates a comment and updates its post's
+// denormalized comment count. A failed counter update rolls the comment back.
+func (r *feedRepository) CreateCommentWithCount(ctx context.Context, comment *model.FeedComment) error {
+	if r == nil || r.db == nil {
+		return errors.New("feed repository database is nil")
+	}
+	if comment == nil {
+		return errors.New("comment is nil")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var post model.FeedPost
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL", comment.PostID).
+			First(&post).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(comment).Error; err != nil {
+			return err
+		}
+		updated := tx.Model(&model.FeedPost{}).
+			Where("id = ? AND deleted_at IS NULL", comment.PostID).
+			UpdateColumn("comment_count", gorm.Expr("comment_count + 1"))
+		if updated.Error != nil {
+			return fmt.Errorf("increase comment count: %w", updated.Error)
+		}
+		if updated.RowsAffected != 1 {
+			return fmt.Errorf("increase comment count affected %d rows", updated.RowsAffected)
+		}
+		return nil
+	})
+}
+
 // GetCommentByID 按 ID 查询评论（不含软删除记录）
 func (r *feedRepository) GetCommentByID(ctx context.Context, commentID uint) (*model.FeedComment, error) {
 	var comment model.FeedComment
@@ -264,6 +369,12 @@ func (r *feedRepository) DeleteComment(ctx context.Context, commentID uint, user
 	return comment.PostID, result.RowsAffected > 0, result.Error
 }
 
+// DeleteCommentWithCount soft-deletes an author's comment and decrements the
+// post counter in the same transaction.
+func (r *feedRepository) DeleteCommentWithCount(ctx context.Context, commentID uint, userID uint) (uint, bool, error) {
+	return r.deleteCommentWithCount(ctx, commentID, &userID)
+}
+
 // ForceDeleteComment 不校验 user_id，供帖子作者删他人评论使用
 func (r *feedRepository) ForceDeleteComment(ctx context.Context, commentID uint) (uint, bool, error) {
 	var comment model.FeedComment
@@ -277,6 +388,69 @@ func (r *feedRepository) ForceDeleteComment(ctx context.Context, commentID uint)
 	}
 	result := r.db.WithContext(ctx).Delete(&comment)
 	return comment.PostID, result.RowsAffected > 0, result.Error
+}
+
+// ForceDeleteCommentWithCount is the post-owner variant of
+// DeleteCommentWithCount; it intentionally does not filter by comment author.
+func (r *feedRepository) ForceDeleteCommentWithCount(ctx context.Context, commentID uint) (uint, bool, error) {
+	return r.deleteCommentWithCount(ctx, commentID, nil)
+}
+
+func (r *feedRepository) deleteCommentWithCount(ctx context.Context, commentID uint, userID *uint) (postID uint, deleted bool, err error) {
+	if r == nil || r.db == nil {
+		return 0, false, errors.New("feed repository database is nil")
+	}
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Read once to discover the parent, then lock that parent before the
+		// mutation. The second read closes the race with a concurrent delete.
+		var current model.FeedComment
+		query := tx.Where("id = ? AND deleted_at IS NULL", commentID)
+		if userID != nil {
+			query = query.Where("user_id = ?", *userID)
+		}
+		if findErr := query.First(&current).Error; findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return findErr
+		}
+
+		var post model.FeedPost
+		if findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND deleted_at IS NULL", current.PostID).
+			First(&post).Error; findErr != nil {
+			return findErr
+		}
+		query = tx.Where("id = ? AND deleted_at IS NULL", commentID)
+		if userID != nil {
+			query = query.Where("user_id = ?", *userID)
+		}
+		if findErr := query.First(&current).Error; findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return findErr
+		}
+		result := tx.Delete(&current)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		updated := tx.Model(&model.FeedPost{}).
+			Where("id = ? AND deleted_at IS NULL AND comment_count > 0", current.PostID).
+			UpdateColumn("comment_count", gorm.Expr("comment_count - 1"))
+		if updated.Error != nil {
+			return fmt.Errorf("decrease comment count: %w", updated.Error)
+		}
+		if updated.RowsAffected != 1 {
+			return fmt.Errorf("decrease comment count affected %d rows", updated.RowsAffected)
+		}
+		postID, deleted = current.PostID, true
+		return nil
+	})
+	return postID, deleted, err
 }
 
 func (r *feedRepository) ListComments(ctx context.Context, postID uint, offset, limit int) ([]model.FeedComment, int64, error) {

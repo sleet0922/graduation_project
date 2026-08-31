@@ -26,10 +26,6 @@ var (
 	ErrE2EEGroupBoxesPublished = errors.New("e2ee group key boxes already published")
 )
 
-const (
-	groupWrapAAD = "zat_e2ee_group_wrap_v1"
-)
-
 type GroupKeyBoxUpload struct {
 	UserID          uint
 	WrappedGroupKey string
@@ -143,8 +139,7 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 	if keyChanged {
 		groups, err := s.groupRepo.GetGroupsByUserID(ctx, userID)
 		if err != nil {
-			_ = s.restoreUserPublicKey(ctx, userID, oldKey)
-			return nil, err
+			return nil, s.rollbackIdentityChange(ctx, userID, oldKey, err)
 		}
 		rotatedVersions := make(map[uint]int, len(groups))
 		for _, group := range groups {
@@ -152,8 +147,8 @@ func (s *e2eeService) PublishUserPublicKey(ctx context.Context, userID uint, key
 			rotated, rotateErr := s.groupKeyRepo.CreateNextVersion(ctx, group.ID, userID)
 			unlockGroupState()
 			if rotateErr != nil {
-				_ = s.restoreUserPublicKey(ctx, userID, oldKey)
-				return nil, fmt.Errorf("rotate group %d after identity change: %w", group.ID, rotateErr)
+				cause := fmt.Errorf("rotate group %d after identity change: %w", group.ID, rotateErr)
+				return nil, s.rollbackIdentityChange(ctx, userID, oldKey, cause)
 			}
 			rotatedVersions[group.ID] = rotated.KeyVersion
 		}
@@ -172,6 +167,13 @@ func (s *e2eeService) restoreUserPublicKey(ctx context.Context, userID uint, old
 	}
 	restored := *oldKey
 	return s.keyRepo.Upsert(ctx, &restored)
+}
+
+func (s *e2eeService) rollbackIdentityChange(ctx context.Context, userID uint, oldKey *model.E2EEUserPublicKey, cause error) error {
+	if restoreErr := s.restoreUserPublicKey(ctx, userID, oldKey); restoreErr != nil {
+		return errors.Join(cause, fmt.Errorf("restore identity key after failed rotation: %w", restoreErr))
+	}
+	return cause
 }
 
 func (s *e2eeService) notifyGroupKeyChanged(ctx context.Context, groupID uint, keyVersion int) {

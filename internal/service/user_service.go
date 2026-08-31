@@ -50,10 +50,16 @@ func NewUserService(userRepo repo.UserRepository) UserService {
 // 生成随机账号（最多重试 5 次确保唯一性）
 func (s *userService) generateRandomAccount(ctx context.Context) (string, error) {
 	for i := 0; i < 5; i++ {
-		prefix, _ := rand.Int(rand.Reader, big.NewInt(9))
-		suffix, _ := rand.Int(rand.Reader, big.NewInt(1000000000))
+		prefix, err := rand.Int(rand.Reader, big.NewInt(9))
+		if err != nil {
+			return "", fmt.Errorf("generate account prefix: %w", err)
+		}
+		suffix, err := rand.Int(rand.Reader, big.NewInt(1000000000))
+		if err != nil {
+			return "", fmt.Errorf("generate account suffix: %w", err)
+		}
 		account := fmt.Sprintf("%d%09d", prefix.Int64()+1, suffix.Int64())
-		_, err := s.userRepo.GetByAccount(ctx, account)
+		_, err = s.userRepo.GetByAccount(ctx, account)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 账号不存在，可以使用
 			return account, nil

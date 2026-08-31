@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"fmt"
 	"sleet0922/graduation_project/internal/model"
 
 	"gorm.io/gorm"
@@ -41,9 +42,11 @@ func (r *userRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 找出该用户发布的所有帖子 IDs
 		var postIDs []uint
-		_ = tx.Model(&model.FeedPost{}).Unscoped().
+		if err := tx.Model(&model.FeedPost{}).Unscoped().
 			Where("user_id = ?", id).
-			Pluck("id", &postIDs)
+			Pluck("id", &postIDs).Error; err != nil {
+			return fmt.Errorf("list user posts before deletion: %w", err)
+		}
 
 		if len(postIDs) > 0 {
 			// 删除这些帖子的媒体附件、点赞、评论

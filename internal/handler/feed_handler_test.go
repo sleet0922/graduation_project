@@ -14,12 +14,12 @@ import (
 )
 
 type fakeFeedService struct {
-	createPostFn   func(context.Context, uint, string, []service.CreateMediaInput) (*model.FeedPost, error)
-	deletePostFn   func(context.Context, uint, uint) error
-	getDetailFn    func(context.Context, uint, uint) (*service.FeedPostWithLiked, error)
-	toggleLikeFn   func(context.Context, uint, uint) (bool, error)
+	createPostFn    func(context.Context, uint, string, []service.CreateMediaInput) (*model.FeedPost, error)
+	deletePostFn    func(context.Context, uint, uint) error
+	getDetailFn     func(context.Context, uint, uint) (*service.FeedPostWithLiked, error)
+	toggleLikeFn    func(context.Context, uint, uint) (bool, error)
 	createCommentFn func(context.Context, uint, uint, string, *uint) (*model.FeedComment, error)
-	listCommentsFn func(context.Context, uint, uint, int, int) ([]model.FeedComment, int64, error)
+	listCommentsFn  func(context.Context, uint, uint, int, int) ([]model.FeedComment, int64, error)
 }
 
 func (s *fakeFeedService) CreatePost(ctx context.Context, userID uint, content string, media []service.CreateMediaInput) (*model.FeedPost, error) {

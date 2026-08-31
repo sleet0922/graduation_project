@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"sleet0922/graduation_project/internal/service"
 	"sleet0922/graduation_project/pkg/errcode"
@@ -16,6 +17,34 @@ type GroupHandler struct {
 
 func NewGroupHandler(groupService service.GroupService) *GroupHandler {
 	return &GroupHandler{groupService: groupService}
+}
+
+// groupServiceError keeps domain failures meaningful at the HTTP boundary.
+// Unknown failures are intentionally reduced to a generic 500 response so
+// database or infrastructure details do not leak to clients.
+func groupServiceError(c *fiber.Ctx, err error) error {
+	if err == nil {
+		return nil
+	}
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, service.ErrGroupNotFound), errors.Is(err, service.ErrGroupMemberNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, service.ErrGroupPermission),
+		errors.Is(err, service.ErrGroupDeleteDenied),
+		errors.Is(err, service.ErrGroupKickDenied),
+		errors.Is(err, service.ErrGroupLeaveDenied):
+		status = http.StatusForbidden
+	case errors.Is(err, service.ErrGroupNameEmpty),
+		errors.Is(err, service.ErrGroupMembersEmpty),
+		errors.Is(err, service.ErrGroupFriendOnly),
+		errors.Is(err, service.ErrGroupOwnerProtected):
+		status = http.StatusBadRequest
+	}
+	if status == http.StatusInternalServerError {
+		return response.Result(c, status, errcode.InternalServerError, nil)
+	}
+	return response.Error(c, status, err.Error())
 }
 
 // ----------GroupHandler 方法----------
@@ -39,7 +68,7 @@ func (h *GroupHandler) Create(c *fiber.Ctx) error {
 
 	group, err := h.groupService.CreateGroup(c.Context(), userID, req.Name, req.Avatar, req.MemberIDs)
 	if err != nil {
-		return response.Error(c, http.StatusBadRequest, err.Error())
+		return groupServiceError(c, err)
 	}
 	return response.Success(c, group, "创建群聊成功")
 }
@@ -63,7 +92,7 @@ func (h *GroupHandler) AddMembers(c *fiber.Ctx) error {
 
 	members, err := h.groupService.AddMembers(c.Context(), userID, req.GroupID, req.MemberIDs)
 	if err != nil {
-		return response.Error(c, http.StatusBadRequest, err.Error())
+		return groupServiceError(c, err)
 	}
 	return response.Success(c, members, "拉群成功")
 }
@@ -87,7 +116,7 @@ func (h *GroupHandler) RemoveMember(c *fiber.Ctx) error {
 
 	err = h.groupService.RemoveMember(c.Context(), userID, req.GroupID, req.MemberID)
 	if err != nil {
-		return response.Error(c, http.StatusBadRequest, err.Error())
+		return groupServiceError(c, err)
 	}
 	return response.Success(c, nil, "踢出群成员成功")
 }
@@ -110,7 +139,7 @@ func (h *GroupHandler) Leave(c *fiber.Ctx) error {
 
 	err = h.groupService.LeaveGroup(c.Context(), userID, req.GroupID)
 	if err != nil {
-		return response.Error(c, http.StatusBadRequest, err.Error())
+		return groupServiceError(c, err)
 	}
 	return response.Success(c, nil, "退出群聊成功")
 }
@@ -132,7 +161,7 @@ func (h *GroupHandler) Delete(c *fiber.Ctx) error {
 
 	err = h.groupService.DeleteGroup(c.Context(), userID, req.GroupID)
 	if err != nil {
-		return response.Error(c, http.StatusBadRequest, err.Error())
+		return groupServiceError(c, err)
 	}
 
 	return response.Success(c, nil, "删除群聊成功")
@@ -147,7 +176,7 @@ func (h *GroupHandler) GetGroups(c *fiber.Ctx) error {
 
 	groups, err := h.groupService.GetGroups(c.Context(), userID)
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "获取群聊列表失败")
+		return groupServiceError(c, err)
 	}
 	return response.Success(c, groups, "获取群聊列表成功")
 }
@@ -166,7 +195,7 @@ func (h *GroupHandler) GetMembers(c *fiber.Ctx) error {
 
 	members, err := h.groupService.GetMembers(c.Context(), userID, uint(groupID))
 	if err != nil {
-		return response.Error(c, http.StatusBadRequest, err.Error())
+		return groupServiceError(c, err)
 	}
 	return response.Success(c, members, "获取群成员成功")
 }

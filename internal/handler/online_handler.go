@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"sleet0922/graduation_project/internal/service"
@@ -27,11 +28,11 @@ type onlineStatus struct {
 }
 
 type onlineOutgoingMessage struct {
-	Type     string          `json:"type"`
-	UserID   uint            `json:"user_id,omitempty"`
-	Online   bool            `json:"online,omitempty"`
-	Statuses []onlineStatus  `json:"statuses,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	Type     string         `json:"type"`
+	UserID   uint           `json:"user_id,omitempty"`
+	Online   bool           `json:"online,omitempty"`
+	Statuses []onlineStatus `json:"statuses,omitempty"`
+	Error    string         `json:"error,omitempty"`
 }
 
 func NewOnlineHandler(chatService service.ChatService) *OnlineHandler {
@@ -40,6 +41,9 @@ func NewOnlineHandler(chatService service.ChatService) *OnlineHandler {
 
 // ----------OnlineHandler 私有方法----------
 func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, c *websocket.Conn, incoming onlineIncomingMessage) error {
+	if h.chatService == nil {
+		return errors.New("聊天服务不可用")
+	}
 	userIDs := make([]uint, 0, len(incoming.UserIDs)+1)
 	if incoming.UserID > 0 {
 		userIDs = append(userIDs, incoming.UserID)
@@ -82,13 +86,27 @@ func (h *OnlineHandler) writeOnlineStatus(ctx context.Context, c *websocket.Conn
 // 建立在线状态 WebSocket 连接
 func (h *OnlineHandler) Connect() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
-		currentUserID := c.Locals("user_id").(uint)
+		currentUserID, ok := c.Locals("user_id").(uint)
+		if !ok || currentUserID == 0 {
+			if err := c.WriteJSON(onlineOutgoingMessage{Type: "error", Error: "未授权"}); err != nil {
+				logger.Warn("failed to write online websocket authentication error", slog.Any("error", err))
+			}
+			_ = c.Close()
+			return
+		}
+		if h.chatService == nil {
+			if err := c.WriteJSON(onlineOutgoingMessage{Type: "error", Error: "聊天服务不可用"}); err != nil {
+				logger.Warn("failed to write online websocket service error", slog.Any("error", err))
+			}
+			_ = c.Close()
+			return
+		}
 
 		if err := c.WriteJSON(onlineOutgoingMessage{
 			Type:   "connected",
 			UserID: currentUserID,
 		}); err != nil {
-			c.Close()
+			_ = c.Close()
 			return
 		}
 		logger.Info("online websocket connected", slog.Any("user_id", currentUserID))

@@ -2,14 +2,15 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	redisPkg "sleet0922/graduation_project/pkg/redis"
 )
 
 func testJSONRequest(method, target string, body any) *http.Request {
@@ -26,13 +27,32 @@ func testJSONRequest(method, target string, body any) *http.Request {
 	return req
 }
 
+// testSessionStore keeps handler tests independent from a process-global
+// Redis client. Login/refresh behavior has dedicated integration coverage;
+// these endpoint tests only need a valid injected dependency.
+type testSessionStore struct{}
+
+var _ redisPkg.SessionStore = testSessionStore{}
+
+func (testSessionStore) SetUserSession(uint, string, time.Duration) (string, error) {
+	return "", nil
+}
+func (testSessionStore) GetUserSession(uint) (string, error)                         { return "", nil }
+func (testSessionStore) ExpireUserSession(uint, time.Duration) error                 { return nil }
+func (testSessionStore) DelUserSession(uint) error                                   { return nil }
+func (testSessionStore) IsSessionValid(uint, string) (bool, error)                   { return true, nil }
+func (testSessionStore) SetRefreshTokenID(uint, string, string, time.Duration) error { return nil }
+func (testSessionStore) RotateRefreshTokenID(uint, string, string, string, time.Duration) error {
+	return nil
+}
+
 func testResponse(t *testing.T, app *fiber.App, req *http.Request) (int, map[string]any) {
 	t.Helper()
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("app.Test failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -46,11 +66,4 @@ func withUser(userID uint, next fiber.Handler) fiber.Handler {
 		c.Locals("user_id", userID)
 		return next(c)
 	}
-}
-
-func requestContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		return context.Background()
-	}
-	return ctx
 }

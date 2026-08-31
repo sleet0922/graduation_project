@@ -1,53 +1,94 @@
 package router
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
 	"sleet0922/graduation_project/internal/config"
+	dbstore "sleet0922/graduation_project/internal/db"
 	"sleet0922/graduation_project/internal/handler"
 	"sleet0922/graduation_project/internal/middleware"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/internal/service"
+	"sleet0922/graduation_project/pkg/errcode"
 	"sleet0922/graduation_project/pkg/jwt"
 	"sleet0922/graduation_project/pkg/oss"
-	"time"
+	redisPkg "sleet0922/graduation_project/pkg/redis"
+	"sleet0922/graduation_project/pkg/response"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
+	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
-	r := fiber.New(fiber.Config{
-		DisableStartupMessage: true,
-	})
+// ReadinessCheck is a named dependency probe used by /health/ready. Keeping
+// checks as functions lets tests provide deterministic fakes and keeps the
+// router independent of concrete infrastructure clients.
+type ReadinessCheck struct {
+	Name  string
+	Check func(context.Context) error
+}
 
-	r.Use(middleware.Logger())
-	r.Use(middleware.Recovery())
-	r.Use(middleware.Cors())
-	r.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
-	})
+// Dependencies is the complete object graph required by the HTTP API. The
+// production constructor NewDependencies wires repositories and services;
+// tests can inject fakes directly without opening a database or Redis server.
+type Dependencies struct {
+	Config *config.ViperConfig
+	DB     *gorm.DB
+	Redis  *goredis.Client
+	Logger *slog.Logger
 
+	JWTManager   *jwt.JWTManager
+	SessionStore redisPkg.SessionStore
+	OSSClient    *oss.QiniuKodo
+
+	UserService   service.UserService
+	FriendService service.FriendService
+	GroupService  service.GroupService
+	ChatService   service.ChatService
+	RTCService    service.RTCService
+	E2EEService   service.E2EEService
+	FeedService   service.FeedService
+
+	ReadinessChecks []ReadinessCheck
+}
+
+// NewDependencies wires the default repository/service graph. It is separate
+// from NewRouter so composition can be replaced in tests or future binaries.
+func NewDependencies(database *gorm.DB, cfg *config.ViperConfig, redisClient *goredis.Client) (Dependencies, error) {
+	if database == nil {
+		return Dependencies{}, fmt.Errorf("database dependency is nil")
+	}
+	if cfg == nil {
+		return Dependencies{}, fmt.Errorf("config dependency is nil")
+	}
+	if redisClient == nil {
+		return Dependencies{}, fmt.Errorf("redis dependency is nil")
+	}
 	jwtManager := jwt.NewJWTManager(cfg.JWT.SecretKey)
-	jwtMiddleware := middleware.NewJWTMiddleware(jwtManager)
-
-	userRepo := repo.NewUserRepository(db)
-	friendRepo := repo.NewFriendRepository(db)
-	groupRepo := repo.NewGroupRepository(db)
-	e2eeKeyRepo := repo.NewE2EEKeyRepository(db)
-	e2eeGroupKeyRepo := repo.NewE2EEGroupKeyRepository(db)
-	feedRepo := repo.NewFeedRepository(db)
+	userRepo := repo.NewUserRepository(database)
+	friendRepo := repo.NewFriendRepository(database)
+	groupRepo := repo.NewGroupRepository(database)
+	e2eeKeyRepo := repo.NewE2EEKeyRepository(database)
+	e2eeGroupKeyRepo := repo.NewE2EEGroupKeyRepository(database)
+	feedRepo := repo.NewFeedRepository(database)
 
 	userService := service.NewUserService(userRepo)
-	// chatService 需先初始化，friendService 依赖它推送好友申请通知
-	chatService := service.NewChatService(
-		friendRepo,
-		groupRepo,
+	// chatService must be initialized before friendService because friend
+	// requests use it to push notifications.
+	chatOptions := []service.ChatServiceOption{
 		service.WithE2EEMessageValidation(e2eeKeyRepo, e2eeGroupKeyRepo),
-	)
+		service.WithRedisClient(redisClient),
+	}
+	chatService := service.NewChatService(friendRepo, groupRepo, chatOptions...)
 	friendService := service.NewFriendService(friendRepo, userRepo, chatService)
 	e2eeService := service.NewE2EEService(e2eeKeyRepo, groupRepo, e2eeGroupKeyRepo, friendRepo, chatService)
 	groupService := service.NewGroupService(groupRepo, friendRepo, userRepo, e2eeService, chatService)
-	feedService := service.NewFeedService(feedRepo, userRepo, db)
+	feedService := service.NewFeedService(feedRepo, userRepo)
 
 	rtcTokenTTL := time.Duration(cfg.LiveKit.TokenExpireSeconds) * time.Second
 	if rtcTokenTTL <= 0 {
@@ -55,28 +96,246 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	}
 	rtcService := service.NewRTCService(cfg.LiveKit.URL, cfg.LiveKit.APIKey, cfg.LiveKit.APISecret, rtcTokenTTL, userRepo, friendRepo, groupRepo, chatService)
 
-	accessTokenTTL := time.Duration(cfg.JWT.AccessTokenExpireSeconds) * time.Second
-	refreshTokenTTL := time.Duration(cfg.JWT.RefreshTokenExpireSeconds) * time.Second
-	userHandler := handler.NewUserHandler(userService, jwtManager, accessTokenTTL, refreshTokenTTL, chatService)
+	checks := defaultReadinessChecks(database, redisClient)
 
-	kodoClient := oss.NewQiniuKodo(cfg)
-	ossHandler := handler.NewOssHandler(kodoClient)
+	sessionStore, err := redisPkg.NewSessionStore(redisClient)
+	if err != nil {
+		return Dependencies{}, fmt.Errorf("session store dependency: %w", err)
+	}
+	return Dependencies{
+		Config:          cfg,
+		DB:              database,
+		Redis:           redisClient,
+		JWTManager:      jwtManager,
+		SessionStore:    sessionStore,
+		OSSClient:       oss.NewQiniuKodo(cfg),
+		UserService:     userService,
+		FriendService:   friendService,
+		GroupService:    groupService,
+		ChatService:     chatService,
+		RTCService:      rtcService,
+		E2EEService:     e2eeService,
+		FeedService:     feedService,
+		ReadinessChecks: checks,
+	}, nil
+}
 
-	friendHandler := handler.NewFriendHandler(friendService)
-	groupHandler := handler.NewGroupHandler(groupService)
-	chatHandler := handler.NewChatHandler(chatService, rtcService)
-	onlineHandler := handler.NewOnlineHandler(chatService)
-	rtcHandler := handler.NewRTCHandler(rtcService)
-	e2eeHandler := handler.NewE2EEHandler(e2eeService)
-	feedHandler := handler.NewFeedHandler(feedService)
+func (d Dependencies) Validate() error {
+	if d.Config == nil {
+		return fmt.Errorf("router config dependency is nil")
+	}
+	missing := make([]string, 0, 7)
+	if d.JWTManager == nil {
+		missing = append(missing, "jwt_manager")
+	}
+	if d.OSSClient == nil {
+		missing = append(missing, "oss_client")
+	}
+	if d.UserService == nil {
+		missing = append(missing, "user_service")
+	}
+	if d.FriendService == nil {
+		missing = append(missing, "friend_service")
+	}
+	if d.GroupService == nil {
+		missing = append(missing, "group_service")
+	}
+	if d.ChatService == nil {
+		missing = append(missing, "chat_service")
+	}
+	if d.RTCService == nil {
+		missing = append(missing, "rtc_service")
+	}
+	if d.E2EEService == nil {
+		missing = append(missing, "e2ee_service")
+	}
+	if d.FeedService == nil {
+		missing = append(missing, "feed_service")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("router dependencies missing: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
 
-	// 公开路由
+// NewRouter builds a Fiber app from an explicit dependency graph. It performs
+// no network or database initialization and returns configuration errors to the
+// caller rather than panicking.
+func NewRouter(deps Dependencies) (*fiber.App, error) {
+	if err := deps.Validate(); err != nil {
+		return nil, err
+	}
+	if deps.SessionStore == nil {
+		if deps.Redis != nil {
+			store, err := redisPkg.NewSessionStore(deps.Redis)
+			if err != nil {
+				return nil, err
+			}
+			deps.SessionStore = store
+		} else {
+			return nil, fmt.Errorf("router session store dependency is nil (provide SessionStore or Redis)")
+		}
+	}
+	if len(deps.ReadinessChecks) == 0 {
+		deps.ReadinessChecks = defaultReadinessChecks(deps.DB, deps.Redis)
+	}
+
+	r := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+		ErrorHandler:          apiErrorHandler(deps.Logger),
+	})
+
+	r.Use(middleware.Logger(deps.Logger))
+	r.Use(middleware.Recovery(deps.Logger))
+	r.Use(middleware.Cors(deps.Config.Server.AllowedOrigins))
+	registerHealthRoutes(r, deps.ReadinessChecks, deps.Logger)
+
+	userHandler, err := handler.NewUserHandler(
+		deps.UserService,
+		deps.JWTManager,
+		tokenTTL(deps.Config.JWT.AccessTokenExpireSeconds, 24*time.Hour),
+		tokenTTL(deps.Config.JWT.RefreshTokenExpireSeconds, 30*24*time.Hour),
+		deps.ChatService,
+		handler.WithSessionStore(deps.SessionStore),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build user handler: %w", err)
+	}
+	ossHandler := handler.NewOssHandler(deps.OSSClient)
+	friendHandler := handler.NewFriendHandler(deps.FriendService)
+	groupHandler := handler.NewGroupHandler(deps.GroupService)
+	chatHandler := handler.NewChatHandler(deps.ChatService, deps.RTCService)
+	onlineHandler := handler.NewOnlineHandler(deps.ChatService)
+	rtcHandler := handler.NewRTCHandler(deps.RTCService)
+	e2eeHandler := handler.NewE2EEHandler(deps.E2EEService)
+	feedHandler := handler.NewFeedHandler(deps.FeedService)
+
+	registerPublicRoutes(r, userHandler, ossHandler)
+	if err := registerAuthenticatedRoutes(r, deps, userHandler, ossHandler, friendHandler, groupHandler, chatHandler, onlineHandler, rtcHandler, e2eeHandler, feedHandler); err != nil {
+		return nil, fmt.Errorf("register authenticated routes: %w", err)
+	}
+	return r, nil
+}
+
+func defaultReadinessChecks(database *gorm.DB, redisClient *goredis.Client) []ReadinessCheck {
+	checks := make([]ReadinessCheck, 0, 2)
+	if database != nil {
+		checks = append(checks, ReadinessCheck{Name: "database", Check: func(ctx context.Context) error {
+			return dbstore.Ping(ctx, database)
+		}})
+	}
+	if redisClient != nil {
+		checks = append(checks, ReadinessCheck{Name: "redis", Check: func(ctx context.Context) error {
+			return redisPkg.Ping(ctx, redisClient)
+		}})
+	}
+	return checks
+}
+
+func apiErrorHandler(log *slog.Logger) fiber.ErrorHandler {
+	return func(c *fiber.Ctx, err error) error {
+		status := fiber.StatusInternalServerError
+		if fiberErr, ok := err.(*fiber.Error); ok && fiberErr.Code > 0 {
+			status = fiberErr.Code
+		}
+		if status >= fiber.StatusInternalServerError && log != nil {
+			log.Error("unhandled HTTP error", "error", err, "path", c.Path(), "method", c.Method())
+		}
+		return response.Result(c, status, intErrorCode(status), nil)
+	}
+}
+
+func intErrorCode(status int) int {
+	if status >= 400 && status <= 599 {
+		return status
+	}
+	return errcode.InternalServerError
+}
+
+// NewHealthRouter builds an isolated health/readiness app for probes and unit
+// tests. Production uses the same registration through NewRouter.
+func NewHealthRouter(checks ...ReadinessCheck) *fiber.App {
+	r := fiber.New(fiber.Config{DisableStartupMessage: true})
+	registerHealthRoutes(r, checks, nil)
+	return r
+}
+
+func tokenTTL(seconds int, fallback time.Duration) time.Duration {
+	if seconds <= 0 {
+		return fallback
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func registerHealthRoutes(r *fiber.App, checks []ReadinessCheck, logger *slog.Logger) {
+	liveness := func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok"})
+	}
+	readiness := func(c *fiber.Ctx) error {
+		ctx := c.UserContext()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		statuses := make(map[string]string, len(checks))
+		ready := true
+		for _, check := range checks {
+			if strings.TrimSpace(check.Name) == "" || check.Check == nil {
+				ready = false
+				continue
+			}
+			if err := check.Check(ctx); err != nil {
+				ready = false
+				statuses[check.Name] = "error"
+				if logger != nil {
+					logger.Warn("readiness check failed", "check", check.Name, "error", err)
+				}
+				continue
+			}
+			statuses[check.Name] = "ok"
+		}
+		status := fiber.StatusOK
+		state := "ok"
+		if !ready {
+			status = fiber.StatusServiceUnavailable
+			state = "not_ready"
+		}
+		return c.Status(status).JSON(fiber.Map{"status": state, "checks": statuses})
+	}
+
+	// /health is preserved as the liveness endpoint used by existing clients.
+	r.Get("/health", liveness)
+	r.Get("/healthz", liveness)
+	r.Get("/health/live", liveness)
+	r.Get("/livez", liveness)
+	r.Get("/health/ready", readiness)
+	r.Get("/ready", readiness)
+	r.Get("/readyz", readiness)
+}
+
+func registerPublicRoutes(r *fiber.App, userHandler *handler.UserHandler, ossHandler *handler.OssHandler) {
 	r.Post("/api/user/register", userHandler.Register)
 	r.Post("/api/user/login", userHandler.Login)
 	r.Post("/api/user/refresh", userHandler.RefreshToken)
 	r.Get("/api/oss/download-url", ossHandler.GetDownloadURL)
+}
 
-	// 需要认证的路由
+func registerAuthenticatedRoutes(
+	r *fiber.App,
+	deps Dependencies,
+	userHandler *handler.UserHandler,
+	ossHandler *handler.OssHandler,
+	friendHandler *handler.FriendHandler,
+	groupHandler *handler.GroupHandler,
+	chatHandler *handler.ChatHandler,
+	onlineHandler *handler.OnlineHandler,
+	rtcHandler *handler.RTCHandler,
+	e2eeHandler *handler.E2EEHandler,
+	feedHandler *handler.FeedHandler,
+) error {
+	jwtMiddleware, err := middleware.NewJWTMiddleware(deps.JWTManager, deps.SessionStore)
+	if err != nil {
+		return err
+	}
 	auth := jwtMiddleware.Auth()
 	r.Get("/api/oss/upload-url", auth, ossHandler.GetUploadURL)
 	r.Post("/api/chat/upload/image", auth, ossHandler.UploadChatImage)
@@ -116,7 +375,6 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	r.Get("/api/e2ee/group/key/by-version", auth, e2eeHandler.GetGroupKeyByVersion)
 	r.Post("/api/user/delete", auth, userHandler.Delete)
 
-	// 朋友圈/动态
 	r.Post("/api/feed/create", auth, feedHandler.CreatePost)
 	r.Delete("/api/feed/delete", auth, feedHandler.DeletePost)
 	r.Get("/api/feed/detail", auth, feedHandler.GetDetail)
@@ -128,7 +386,6 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	r.Delete("/api/feed/comment", auth, feedHandler.DeleteComment)
 	r.Get("/api/feed/comments", auth, feedHandler.ListComments)
 
-	// WebSocket 路由（需要 WSAuth 认证）
 	wsAuth := jwtMiddleware.WSAuth()
 	r.Use("/ws", wsAuth, func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
@@ -138,6 +395,5 @@ func InitRouter(db *gorm.DB, cfg *config.ViperConfig) *fiber.App {
 	})
 	r.Get("/ws/chat", chatHandler.Connect())
 	r.Get("/ws/online", onlineHandler.Connect())
-
-	return r
+	return nil
 }

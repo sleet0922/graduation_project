@@ -96,7 +96,21 @@ func (h *ChatHandler) scheduleForegroundDisconnect(userID uint) {
 // 建立聊天 WebSocket 连接
 func (h *ChatHandler) Connect() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
-		userID := c.Locals("user_id").(uint)
+		userID, ok := c.Locals("user_id").(uint)
+		if !ok || userID == 0 {
+			if err := c.WriteJSON(chatOutgoingMessage{Type: "error", Error: "未授权"}); err != nil {
+				logger.Warn("failed to write websocket authentication error", slog.Any("error", err))
+			}
+			_ = c.Close()
+			return
+		}
+		if h.chatService == nil {
+			if err := c.WriteJSON(chatOutgoingMessage{Type: "error", Error: "聊天服务不可用"}); err != nil {
+				logger.Warn("failed to write websocket service error", slog.Any("error", err))
+			}
+			_ = c.Close()
+			return
+		}
 		client := strings.ToLower(strings.TrimSpace(c.Query("client", "foreground")))
 		if client != "background" {
 			client = "foreground"
@@ -114,7 +128,7 @@ func (h *ChatHandler) Connect() fiber.Handler {
 			Type:   "connected",
 			UserID: userID,
 		}); err != nil {
-			c.Close()
+			_ = c.Close()
 			return
 		}
 
@@ -128,7 +142,7 @@ func (h *ChatHandler) Connect() fiber.Handler {
 		}, func(payload any) error {
 			return writeJSON(payload)
 		}, func() {
-			c.Close()
+			_ = c.Close()
 		}, service.WithOfflineDrain(drainOffline), service.WithConnectionClient(client))
 		if client == "foreground" {
 			h.cancelForegroundDisconnect(userID)
@@ -157,7 +171,9 @@ func (h *ChatHandler) Connect() fiber.Handler {
 					}
 				case "mark_read":
 					// 通知对端已读：mark_read { to_user_id | group_id }
-					_ = h.chatService.MarkRead(ctx, userID, incoming.ToUserID, incoming.GroupID)
+					if err := h.chatService.MarkRead(ctx, userID, incoming.ToUserID, incoming.GroupID); err != nil {
+						logger.Warn("mark chat message as read failed", slog.Any("user_id", userID), slog.Any("error", err))
+					}
 				case "recall":
 					// 撤回消息：recall { to_user_id | group_id, message_id }
 					if err := h.chatService.RecallMessage(ctx, userID, incoming.ToUserID, incoming.GroupID, incoming.MessageID); err != nil {

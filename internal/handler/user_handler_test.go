@@ -108,7 +108,10 @@ func (s *fakeUserService) UpsertLocation(ctx context.Context, location *model.Us
 }
 
 func TestUserHandlerRegister(t *testing.T) {
-	handler := NewUserHandler(&fakeUserService{}, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil)
+	handler, err := NewUserHandler(&fakeUserService{}, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil, WithSessionStore(testSessionStore{}))
+	if err != nil {
+		t.Fatalf("NewUserHandler failed: %v", err)
+	}
 	app := fiber.New()
 	app.Post("/register", handler.Register)
 
@@ -122,11 +125,14 @@ func TestUserHandlerRegister(t *testing.T) {
 		t.Fatalf("bad register response = status %d payload %#v, want invalid params", status, payload)
 	}
 
-	duplicate := NewUserHandler(&fakeUserService{
+	duplicate, err := NewUserHandler(&fakeUserService{
 		registerFn: func(ctx context.Context, email, password string) (*model.User, error) {
 			return nil, service.ErrUserAlreadyExists
 		},
-	}, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil)
+	}, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil, WithSessionStore(testSessionStore{}))
+	if err != nil {
+		t.Fatalf("NewUserHandler duplicate failed: %v", err)
+	}
 	app = fiber.New()
 	app.Post("/register", duplicate.Register)
 	status, payload = testResponse(t, app, testJSONRequest("POST", "/register", map[string]any{"email": "a@example.com", "password": "secret123"}))
@@ -150,7 +156,10 @@ func TestUserHandlerAuthenticatedEndpoints(t *testing.T) {
 			return nil
 		},
 	}
-	handler := NewUserHandler(svc, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil)
+	handler, err := NewUserHandler(svc, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil, WithSessionStore(testSessionStore{}))
+	if err != nil {
+		t.Fatalf("NewUserHandler failed: %v", err)
+	}
 	app := fiber.New()
 	app.Post("/self", handler.GetSelf)
 	app.Post("/password", withUser(7, handler.UpdatePassword))
@@ -169,5 +178,17 @@ func TestUserHandlerAuthenticatedEndpoints(t *testing.T) {
 	status, payload = testResponse(t, app, testJSONRequest("POST", "/location", map[string]any{"latitude": 1.2, "longitude": 3.4, "city": "Shanghai"}))
 	if status != http.StatusOK || int(payload["code"].(float64)) != errcode.Success {
 		t.Fatalf("location response = status %d payload %#v, want success", status, payload)
+	}
+}
+
+func TestNewUserHandlerRejectsMissingDependencies(t *testing.T) {
+	if _, err := NewUserHandler(&fakeUserService{}, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil); err == nil {
+		t.Fatal("NewUserHandler accepted a missing session store")
+	}
+	if _, err := NewUserHandler(nil, jwt.NewJWTManager("secret"), time.Hour, time.Hour, nil, WithSessionStore(testSessionStore{})); err == nil {
+		t.Fatal("NewUserHandler accepted a nil user service")
+	}
+	if _, err := NewUserHandler(&fakeUserService{}, nil, time.Hour, time.Hour, nil, WithSessionStore(testSessionStore{})); err == nil {
+		t.Fatal("NewUserHandler accepted a nil JWT manager")
 	}
 }

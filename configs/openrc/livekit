@@ -2,13 +2,61 @@
 
 name="LiveKit server"
 command="/usr/local/bin/livekit-server"
-command_args="--config /etc/livekit/livekit.yaml"
+command_args="--config /run/graduation-project-livekit.yaml"
 command_background="yes"
 pidfile="/run/$RC_SVCNAME.pid"
 output_log="/var/log/livekit.log"
 error_log="/var/log/livekit.log"
 
 depend() {
-	need net localmount
-	after firewall
+	need net localmount redis
+	after firewall redis
+}
+
+load_env() {
+	if [ -r /etc/bocker.env ]; then
+		set -a
+		. /etc/bocker.env
+		set +a
+	fi
+}
+
+start_pre() {
+	load_env
+	local key="${ZAT_LIVEKIT_API_KEY:-}"
+	local secret="${ZAT_LIVEKIT_API_SECRET:-}"
+	local port="${LIVEKIT_PORT:-7880}"
+	local tcp_port="${LIVEKIT_RTC_TCP_PORT:-7881}"
+	local udp_port="${LIVEKIT_RTC_UDP_PORT:-7882}"
+	local redis_port="${REDIS_PORT:-6379}"
+	local external_ip="${LIVEKIT_USE_EXTERNAL_IP:-false}"
+	if [ -z "$key" ] || [ -z "$secret" ]; then
+		eerror "ZAT_LIVEKIT_API_KEY and ZAT_LIVEKIT_API_SECRET are required"
+		return 1
+	fi
+	case "$key$secret" in
+		*[!A-Za-z0-9._-]*) eerror "LiveKit credentials contain unsupported characters"; return 1 ;;
+	esac
+	case "$port:$tcp_port:$udp_port:$redis_port" in
+		*[!0-9:]*|*::*|:*) eerror "LiveKit and Redis ports must be numeric"; return 1 ;;
+	esac
+	case "$external_ip" in
+		true|false) ;;
+		*) eerror "LIVEKIT_USE_EXTERNAL_IP must be true or false"; return 1 ;;
+	esac
+	checkpath -d -m 0755 /run /var/log
+	cat > /run/graduation-project-livekit.yaml <<EOF
+port: $port
+bind_addresses:
+  - 0.0.0.0
+rtc:
+  tcp_port: $tcp_port
+  udp_port: $udp_port
+  use_external_ip: $external_ip
+redis:
+  address: 127.0.0.1:$redis_port
+keys:
+  $key: $secret
+EOF
+	chmod 0600 /run/graduation-project-livekit.yaml
 }

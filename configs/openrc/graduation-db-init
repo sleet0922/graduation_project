@@ -4,18 +4,45 @@ name="graduation-project database initialization"
 
 depend() {
 	need postgresql
+	after postgresql
+	before graduation-project
+}
+
+load_env() {
+	if [ -r /etc/bocker.env ]; then
+		set -a
+		. /etc/bocker.env
+		set +a
+	fi
 }
 
 start() {
-	ebegin "Configuring graduation-project PostgreSQL role and database"
-	local password='Zyz20050922!'
-	if ! su postgres -c "psql -d postgres -tAc \"SELECT 1 FROM pg_roles WHERE rolname='sleet'\"" | grep -q 1; then
-		su postgres -c "psql -v ON_ERROR_STOP=1 -d postgres -c \"CREATE ROLE sleet LOGIN PASSWORD '$password'\"" || { eend 1; return 1; }
-	else
-		su postgres -c "psql -v ON_ERROR_STOP=1 -d postgres -c \"ALTER ROLE sleet WITH LOGIN PASSWORD '$password'\"" || { eend 1; return 1; }
+	load_env
+	local password="${ZAT_DATABASE_PASSWORD:-}"
+	if [ -z "$password" ]; then
+		eerror "ZAT_DATABASE_PASSWORD is required"
+		return 1
 	fi
-	if ! su postgres -c "psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='graduation_project'\"" | grep -q 1; then
-		su postgres -c "createdb -O sleet graduation_project" || { eend 1; return 1; }
+
+	ebegin "Configuring graduation-project PostgreSQL role and database"
+	local escaped_password
+	escaped_password=$(printf '%s' "$password" | sed "s/'/''/g")
+	if su postgres -s /bin/sh -c "psql -d postgres -tAc \"SELECT 1 FROM pg_roles WHERE rolname='sleet'\"" | grep -q 1; then
+		if ! su postgres -s /bin/sh -c "psql -v ON_ERROR_STOP=1 -d postgres -c \"ALTER ROLE sleet WITH LOGIN PASSWORD '$escaped_password'\""; then
+			eend 1
+			return 1
+		fi
+	else
+		if ! su postgres -s /bin/sh -c "psql -v ON_ERROR_STOP=1 -d postgres -c \"CREATE ROLE sleet LOGIN PASSWORD '$escaped_password'\""; then
+			eend 1
+			return 1
+		fi
+	fi
+	if ! su postgres -s /bin/sh -c "psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='graduation_project'\"" | grep -q 1; then
+		if ! su postgres -s /bin/sh -c "createdb -O sleet graduation_project"; then
+			eend 1
+			return 1
+		fi
 	fi
 	eend 0
 }

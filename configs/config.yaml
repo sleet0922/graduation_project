@@ -4,7 +4,9 @@ server:
 
 database:
   username: "sleet"
-  password: "Zyz20050922!"
+  # Inject ZAT_DATABASE_PASSWORD at runtime. The OpenRC services read it from
+  # the Bocker-provided environment file.
+  password: "SET_ZAT_DATABASE_PASSWORD_IN_ENVIRONMENT"
   host: "127.0.0.1"
   port: 5432
   dbname: "graduation_project"
@@ -12,22 +14,22 @@ database:
   auto_migrate: false
 
 oss:
-  access_key_id: "0CsZkaRGG_4IifjzH4NOcMN4jGbngAoNoZBK7rsQ"
-  secret_access_key: "S3flntD41AG3rS75BdcRR3Yrb-Y_PxIjRgvFT7W1"
+  access_key_id: "SET_ZAT_OSS_ACCESS_KEY_ID_IN_ENVIRONMENT"
+  secret_access_key: "SET_ZAT_OSS_SECRET_ACCESS_KEY_IN_ENVIRONMENT"
   bucket: "sleet"
   endpoint: "https://s3-cn-east-1.qiniucs.com"
   base_path: ""
   cdn_domain: "http://cdn.gelsomino.cn"
 
 jwt:
-  secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"
+  secret_key: "SET_ZAT_JWT_SECRET_IN_ENVIRONMENT"
   access_token_expire_seconds: 86400
   refresh_token_expire_seconds: 2592000
 
 livekit:
-  url: "wss://mini.gelsomino.cn:444"
-  api_key: "devkey"
-  api_secret: "graduation-project-livekit-secret-2026"
+  url: "SET_ZAT_LIVEKIT_URL_IN_ENVIRONMENT"
+  api_key: "SET_ZAT_LIVEKIT_API_KEY_IN_ENVIRONMENT"
+  api_secret: "SET_ZAT_LIVEKIT_API_SECRET_IN_ENVIRONMENT"
   token_expire_seconds: 7200
 
 log:

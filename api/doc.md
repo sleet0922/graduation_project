@@ -1,12 +1,12 @@
 # Graduation Project API
 
-本文档对应当前后端路由实现，并于 2026-08-17 在公网环境逐项验证。
+本文档对应当前后端路由实现；完整黑盒验收以 `api/e2e_test.py` 的本机和远端运行结果为准。
 
 - HTTPS 基础地址：`https://mini.gelsomino.cn:444`
 - WebSocket 基础地址：`wss://mini.gelsomino.cn:444`
 - HTTP `81` 端口会重定向到 HTTPS `444`
 - 数据格式：JSON，编码：UTF-8
-- 实测范围：52 个 HTTP 接口、2 个 WebSocket 入口，共 79 项断言
+- 覆盖范围：52 个 HTTP 接口、2 个 WebSocket 入口，以及 LiveKit 房间和视频轨道
 
 ## 1. 通用约定
 
@@ -60,8 +60,8 @@
 Authorization: Bearer <access_token>
 ```
 
-WebSocket 可使用相同 Header，也可使用 `?token=<access_token>`。Access Token
-不能替换为 Refresh Token。
+WebSocket 也必须使用相同的 `Authorization` Header；不会从 URL Query 读取凭据，
+以避免 Token 进入代理日志、浏览器历史或 Referer。Access Token 不能替换为 Refresh Token。
 
 | Token | 默认有效期 | 用途 |
 | --- | --- | --- |
@@ -657,7 +657,6 @@ wss://mini.gelsomino.cn:444/ws/chat?client=foreground
 | Query | 可选值 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `client` | `foreground`、`background` | `foreground` | 前台连接会拉取离线消息；后台连接不会 |
-| `token` | Access Token | 无 | 未使用 Authorization Header 时可传 |
 
 连接成功：
 

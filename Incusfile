@@ -2,6 +2,12 @@ version: 2
 mirror: china
 name: graduation-project
 network: nat
+args:
+  APP_DOMAIN: "graduation-project.test"
+  LIVEKIT_URL: "ws://graduation-project.test:7880"
+  LIVEKIT_USE_EXTERNAL_IP: "false"
+  TLS_MODE: "local"
+  DEPLOYMENT_MODE: "development"
 stages:
   - name: builder
     from: alpine:3.24
@@ -13,6 +19,7 @@ stages:
       - url: "https://gitee.com/sleet0922/cloud_disk/releases/download/v1.0/livekit_1.13.5_linux_amd64.tar.gz"
         extract: /out
         format: tar.gz
+        sha256: "c020fac437b7cc9b776eef1ad5ea8af77be9acfa07602eca20a3a44930dfbc70"
         timeout: 120
         tries: 3
     commands:
@@ -21,23 +28,46 @@ stages:
       - [go, build, -trimpath, "-ldflags=-s -w", -o, /out/graduation-project, ./cmd/api]
       - [chmod, "0755", /out/graduation-project, /out/livekit-server]
   - from: alpine:3.24
-    packages: [ca-certificates, openssl, postgresql17, redis, caddy, gcompat]
+    packages: [ca-certificates, curl, openssl, postgresql17, redis, caddy, gcompat]
     workdir: /opt/graduation-project
     artifacts: {builder: {/out/graduation-project: /usr/local/bin/graduation-project, /out/livekit-server: /usr/local/bin/livekit-server}}
-    files: {/opt/graduation-project/configs/: [configs/config.yaml], /etc/livekit/: [configs/livekit.yaml], /etc/caddy/: [configs/Caddyfile], /etc/caddy/certs/: [ssl], /etc/init.d/: [configs/openrc/graduation-db-init, configs/openrc/livekit, configs/openrc/graduation-project]}
+    files: {/opt/graduation-project/configs/: [configs/config.yaml], /etc/livekit/: [configs/livekit.yaml], /etc/caddy/: [configs/Caddyfile], /etc/caddy/certs/: [ssl], /etc/init.d/: [configs/openrc/graduation-db-init, configs/openrc/livekit, configs/openrc/graduation-project, configs/openrc/graduation-caddy]}
+    env:
+      APP_ROOT: "/opt/graduation-project"
     commands:
       - shell: |
           set -eu
-          mkdir -p /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project
-          chmod 0755 /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /usr/local/bin/graduation-project /usr/local/bin/livekit-server /etc/init.d/graduation-db-init /etc/init.d/livekit /etc/init.d/graduation-project
-          chmod 0644 /etc/caddy/certs/1.pem; chmod 0640 /etc/caddy/certs/1.key
+          mkdir -p /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /etc/caddy/certs
+          chmod 0755 /var/lib/livekit /var/log/graduation-project /opt/graduation-project/logs /etc/graduation-project /usr/local/bin/graduation-project /usr/local/bin/livekit-server /etc/init.d/graduation-db-init /etc/init.d/livekit /etc/init.d/graduation-project /etc/init.d/graduation-caddy
+          chmod 0644 /etc/caddy/certs/1.pem
+          chmod 0600 /etc/caddy/certs/1.key
           rc-update add postgresql default
           rc-update add redis default
           rc-update add livekit default
           rc-update add graduation-db-init default
           rc-update add graduation-project default
-          rc-update add caddy default
+          rc-update add graduation-caddy default
     runtime:
-      expose: [81, 444, 444/udp, 7881, 7882/udp]
-      domain: graduation-project.test
+      env:
+        BOCKER_DOMAIN: "${APP_DOMAIN}"
+        BOCKER_TLS_MODE: "${TLS_MODE}"
+        BOCKER_DEPLOYMENT_MODE: "${DEPLOYMENT_MODE}"
+        ZAT_ALLOW_INSECURE_DEFAULTS: "1"
+        ZAT_DATABASE_PASSWORD: "local-development-db-password"
+        ZAT_DATABASE_AUTO_MIGRATE: "true"
+        ZAT_JWT_SECRET: "local-development-jwt-secret-change-this"
+        ZAT_OSS_ACCESS_KEY_ID: "local-development-oss-access-key"
+        ZAT_OSS_SECRET_ACCESS_KEY: "local-development-oss-secret-key"
+        ZAT_LIVEKIT_API_KEY: "devkey"
+        ZAT_LIVEKIT_API_SECRET: "local-development-livekit-secret"
+        LIVEKIT_USE_EXTERNAL_IP: "${LIVEKIT_USE_EXTERNAL_IP}"
+        ZAT_LIVEKIT_URL: "${LIVEKIT_URL}"
+        LIVEKIT_PORT: "7880"
+        LIVEKIT_RTC_TCP_PORT: "7881"
+        LIVEKIT_RTC_UDP_PORT: "7882"
+        REDIS_PORT: "6379"
+        BOCKER_TLS_CERT: "/etc/caddy/certs/1.pem"
+        BOCKER_TLS_KEY: "/etc/caddy/certs/1.key"
+      expose: [81, 444, 7880, 7881, 7882/udp]
+      domain: "${APP_DOMAIN}"
       autostart: true

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -30,20 +31,40 @@ type UserHandler struct {
 	userService           service.UserService
 	chatService           service.ChatService
 	jwtManager            *jwt.JWTManager
+	sessionStore          redisPkg.SessionStore
 	accessTokenExpiresIn  time.Duration
 	refreshTokenExpiresIn time.Duration
 }
 
 // ----------用户 handler 私有方法----------
 // 生成 32 字符的随机 session ID
-func generateSessionID() string {
+func generateSessionID() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // ----------用户 handler 构造函数----------
-func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, accessTokenTTL, refreshTokenTTL time.Duration, chatService service.ChatService) *UserHandler {
+type UserHandlerOption func(*UserHandler)
+
+// WithSessionStore injects the session/refresh-token store used by the
+// authentication endpoints. A store is mandatory; the constructor rejects a
+// missing value instead of silently selecting a process-global Redis client.
+func WithSessionStore(store redisPkg.SessionStore) UserHandlerOption {
+	return func(handler *UserHandler) {
+		handler.sessionStore = store
+	}
+}
+
+func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager, accessTokenTTL, refreshTokenTTL time.Duration, chatService service.ChatService, options ...UserHandlerOption) (*UserHandler, error) {
+	if userService == nil {
+		return nil, fmt.Errorf("user handler: user service dependency is nil")
+	}
+	if jwtManager == nil {
+		return nil, fmt.Errorf("user handler: jwt manager dependency is nil")
+	}
 	if accessTokenTTL <= 0 {
 		accessTokenTTL = 24 * time.Hour
 	}
@@ -51,13 +72,22 @@ func NewUserHandler(userService service.UserService, jwtManager *jwt.JWTManager,
 		refreshTokenTTL = 30 * 24 * time.Hour
 	}
 
-	return &UserHandler{
+	handler := &UserHandler{
 		userService:           userService,
 		chatService:           chatService,
 		jwtManager:            jwtManager,
 		accessTokenExpiresIn:  accessTokenTTL,
 		refreshTokenExpiresIn: refreshTokenTTL,
 	}
+	for _, option := range options {
+		if option != nil {
+			option(handler)
+		}
+	}
+	if handler.sessionStore == nil {
+		return nil, fmt.Errorf("user handler: session store dependency is nil")
+	}
+	return handler, nil
 }
 
 // ----------用户 handler 方法----------
@@ -153,7 +183,11 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		}
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	sessionID := generateSessionID()
+	sessionID, err := generateSessionID()
+	if err != nil {
+		slog.Error("generate session id failed", slog.Any("user_id", user.ID), slog.Any("error", err))
+		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
+	}
 	refreshID, err := jwt.GenerateTokenID()
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
@@ -167,12 +201,12 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
-	_, err = redisPkg.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
+	_, err = h.sessionStore.SetUserSession(user.ID, sessionID, h.refreshTokenExpiresIn)
 	if err != nil {
 		slog.Error("SetUserSession failed", slog.Any("user_id", user.ID), slog.Any("error", err))
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	if err := redisPkg.SetRefreshTokenID(user.ID, sessionID, refreshID, h.refreshTokenExpiresIn); err != nil {
+	if err := h.sessionStore.SetRefreshTokenID(user.ID, sessionID, refreshID, h.refreshTokenExpiresIn); err != nil {
 		slog.Error("SetRefreshTokenID failed", slog.Any("user_id", user.ID), slog.Any("error", err))
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
@@ -269,7 +303,12 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 	if claims.TokenType != jwt.TokenTypeRefresh || claims.SessionID == "" || claims.RefreshID == "" {
 		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 	}
-	if !redisPkg.IsSessionValid(claims.UserID, claims.SessionID) {
+	valid, err := h.sessionStore.IsSessionValid(claims.UserID, claims.SessionID)
+	if err != nil {
+		slog.Error("校验会话失败", slog.Any("user_id", claims.UserID), slog.Any("error", err))
+		return response.Result(c, http.StatusServiceUnavailable, errcode.InternalServerError, nil)
+	}
+	if !valid {
 		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
@@ -277,11 +316,11 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 	if err != nil {
 		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
-	if err := redisPkg.RotateRefreshTokenID(claims.UserID, claims.SessionID, claims.RefreshID, newRefreshID, h.refreshTokenExpiresIn); err != nil {
+	if err := h.sessionStore.RotateRefreshTokenID(claims.UserID, claims.SessionID, claims.RefreshID, newRefreshID, h.refreshTokenExpiresIn); err != nil {
 		slog.Warn("RotateRefreshTokenID failed", slog.Any("user_id", claims.UserID), slog.Any("error", err))
 		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 	}
-	if err := redisPkg.ExpireUserSession(claims.UserID, h.refreshTokenExpiresIn); err != nil {
+	if err := h.sessionStore.ExpireUserSession(claims.UserID, h.refreshTokenExpiresIn); err != nil {
 		slog.Error("ExpireUserSession failed", slog.Any("user_id", claims.UserID), slog.Any("error", err))
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}

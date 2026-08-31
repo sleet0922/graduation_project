@@ -3,12 +3,10 @@ package service
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
+	"gorm.io/gorm"
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var (
@@ -56,11 +54,10 @@ type FeedService interface {
 type feedService struct {
 	feedRepo repo.FeedRepository
 	userRepo repo.UserRepository
-	db       *gorm.DB
 }
 
-func NewFeedService(feedRepo repo.FeedRepository, userRepo repo.UserRepository, db *gorm.DB) FeedService {
-	return &feedService{feedRepo: feedRepo, userRepo: userRepo, db: db}
+func NewFeedService(feedRepo repo.FeedRepository, userRepo repo.UserRepository) FeedService {
+	return &feedService{feedRepo: feedRepo, userRepo: userRepo}
 }
 
 // ===================== 帖子 =====================
@@ -126,8 +123,7 @@ func (s *feedService) GetPostDetail(ctx context.Context, userID, postID uint) (*
 	}
 	liked, err := s.feedRepo.IsLiked(ctx, postID, userID)
 	if err != nil {
-		slog.Error("查询点赞状态失败", "error", err, "post_id", postID, "user_id", userID)
-		liked = false // 查询失败不阻断，默认未点赞
+		return nil, fmt.Errorf("查询点赞状态失败: %w", err)
 	}
 	return &FeedPostWithLiked{Post: post, IsLiked: liked}, nil
 }
@@ -146,7 +142,11 @@ func (s *feedService) ListFeed(ctx context.Context, userID uint, page, pageSize 
 		return nil, 0, err
 	}
 
-	return s.fillLikedStatus(ctx, posts, userID), total, nil
+	items, err := s.fillLikedStatus(ctx, posts, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (s *feedService) ListMyPosts(ctx context.Context, userID uint, page, pageSize int) ([]FeedPostWithLiked, int64, error) {
@@ -163,11 +163,15 @@ func (s *feedService) ListMyPosts(ctx context.Context, userID uint, page, pageSi
 		return nil, 0, err
 	}
 
-	return s.fillLikedStatus(ctx, posts, userID), total, nil
+	items, err := s.fillLikedStatus(ctx, posts, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 // fillLikedStatus 批量填充帖子的 is_liked 状态
-func (s *feedService) fillLikedStatus(ctx context.Context, posts []model.FeedPost, userID uint) []FeedPostWithLiked {
+func (s *feedService) fillLikedStatus(ctx context.Context, posts []model.FeedPost, userID uint) ([]FeedPostWithLiked, error) {
 	postIDs := make([]uint, len(posts))
 	for i, p := range posts {
 		postIDs[i] = p.ID
@@ -175,8 +179,7 @@ func (s *feedService) fillLikedStatus(ctx context.Context, posts []model.FeedPos
 
 	likedMap, err := s.feedRepo.BatchIsLiked(ctx, postIDs, userID)
 	if err != nil {
-		slog.Error("批量查询点赞状态失败", "error", err, "user_id", userID)
-		likedMap = make(map[uint]bool) // 查询失败不阻断
+		return nil, fmt.Errorf("批量查询点赞状态失败: %w", err)
 	}
 
 	result := make([]FeedPostWithLiked, len(posts))
@@ -186,77 +189,19 @@ func (s *feedService) fillLikedStatus(ctx context.Context, posts []model.FeedPos
 			IsLiked: likedMap[p.ID],
 		}
 	}
-	return result
+	return result, nil
 }
 
 // ===================== 点赞 =====================
 
-// ToggleLike 点赞/取消点赞（事务内原子操作，防止并发竞态）
+// ToggleLike 点赞/取消点赞。事务边界由 repository 管理，确保点赞记录和
+// 冗余计数始终一起提交或回滚。
 func (s *feedService) ToggleLike(ctx context.Context, userID, postID uint) (bool, error) {
-	// 检查帖子是否存在
-	_, err := s.feedRepo.GetPostByID(ctx, postID)
+	isLiked, err := s.feedRepo.ToggleLike(ctx, userID, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, ErrPostNotFound
 		}
-		return false, err
-	}
-
-	var isLiked bool
-
-	// 在事务中执行，保证"查询+操作+计数"的原子性
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. 在事务中查询当前点赞状态（加行锁 SELECT FOR UPDATE 防止并发）
-		var count int64
-		if err := tx.Model(&model.FeedLike{}).
-			Where("post_id = ? AND user_id = ?", postID, userID).
-			Count(&count).Error; err != nil {
-			return err
-		}
-
-		if count > 0 {
-			// 已点赞 → 取消点赞（硬删除）
-			result := tx.Where("post_id = ? AND user_id = ?", postID, userID).
-				Delete(&model.FeedLike{})
-			if result.Error != nil {
-				return result.Error
-			}
-			// 只有真正删除了记录才减计数
-			if result.RowsAffected > 0 {
-				if err := tx.Model(&model.FeedPost{}).
-					Where("id = ? AND like_count > 0", postID).
-					UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
-					slog.Error("减少点赞计数失败", "error", err, "post_id", postID)
-				}
-			}
-			isLiked = false
-		} else {
-			// 未点赞 → 创建点赞
-			like := &model.FeedLike{
-				PostID: postID,
-				UserID: userID,
-			}
-			result := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "post_id"}, {Name: "user_id"}},
-				DoNothing: true,
-			}).Create(like)
-			if result.Error != nil {
-				return result.Error
-			}
-			// 只有真正插入了记录才加计数
-			if result.RowsAffected > 0 {
-				if err := tx.Model(&model.FeedPost{}).
-					Where("id = ?", postID).
-					UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
-					slog.Error("增加点赞计数失败", "error", err, "post_id", postID)
-				}
-			}
-			isLiked = true
-		}
-		return nil
-	})
-
-	if err != nil {
 		return false, err
 	}
 	return isLiked, nil
@@ -286,12 +231,12 @@ func (s *feedService) CreateComment(ctx context.Context, userID, postID uint, co
 		ReplyToID: replyToID,
 	}
 
-	if err := s.feedRepo.CreateComment(ctx, comment); err != nil {
+	if err := s.feedRepo.CreateCommentWithCount(ctx, comment); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPostNotFound
+		}
 		return nil, err
 	}
-
-	// 增加评论计数
-	_ = s.feedRepo.IncrementCommentCount(ctx, postID)
 
 	return comment, nil
 }
@@ -306,12 +251,9 @@ func (s *feedService) DeleteComment(ctx context.Context, userID, commentID uint)
 		return err
 	}
 
-	var postID uint
-	var deleted bool
-
 	if comment.UserID == userID {
 		// 评论作者删自己的评论
-		postID, deleted, err = s.feedRepo.DeleteComment(ctx, commentID, userID)
+		_, _, err = s.feedRepo.DeleteCommentWithCount(ctx, commentID, userID)
 	} else {
 		// 检查操作者是否为帖子作者
 		post, postErr := s.feedRepo.GetPostByID(ctx, comment.PostID)
@@ -325,15 +267,14 @@ func (s *feedService) DeleteComment(ctx context.Context, userID, commentID uint)
 			return ErrNotPostOwner
 		}
 		// 帖子作者强制删除
-		postID, deleted, err = s.feedRepo.ForceDeleteComment(ctx, commentID)
+		_, _, err = s.feedRepo.ForceDeleteCommentWithCount(ctx, commentID)
 	}
 
 	if err != nil {
 		return err
 	}
-	if deleted && postID > 0 {
-		_ = s.feedRepo.DecrementCommentCount(ctx, postID)
-	}
+	// The repository has already committed the comment deletion and counter
+	// update atomically; no second write is needed here.
 	return nil
 }
 

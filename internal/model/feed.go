@@ -16,9 +16,9 @@ type FeedPost struct {
 	UserID  uint   `json:"user_id" gorm:"index;not null"`
 	Content string `json:"content" gorm:"type:text"`
 	// 关联
-	Author   User         `json:"author" gorm:"foreignKey:UserID"`
-	Media    []FeedMedia  `json:"media" gorm:"foreignKey:PostID"`
-	Likes    []FeedLike   `json:"-" gorm:"foreignKey:PostID"`
+	Author   User          `json:"author" gorm:"foreignKey:UserID"`
+	Media    []FeedMedia   `json:"media" gorm:"foreignKey:PostID"`
+	Likes    []FeedLike    `json:"-" gorm:"foreignKey:PostID"`
 	Comments []FeedComment `json:"-" gorm:"foreignKey:PostID"`
 	// 计数（数据库冗余字段，避免频繁 count 查询）
 	LikeCount    int `json:"like_count" gorm:"default:0"`
@@ -64,8 +64,8 @@ type FeedComment struct {
 	Content   string `json:"content" gorm:"type:text;not null"`
 	ReplyToID *uint  `json:"reply_to_id" gorm:"default:null"` // 回复某条评论的ID，nil表示直接评论帖子
 	// 关联
-	User    User          `json:"user" gorm:"foreignKey:UserID"`
-	ReplyTo *FeedComment  `json:"reply_to,omitempty" gorm:"foreignKey:ReplyToID"`
+	User    User         `json:"user" gorm:"foreignKey:UserID"`
+	ReplyTo *FeedComment `json:"reply_to,omitempty" gorm:"foreignKey:ReplyToID"`
 }
 
 func (FeedComment) TableName() string {

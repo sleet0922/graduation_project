@@ -28,7 +28,7 @@ func GenerateToken(apiKey, apiSecret, roomID, participantIdentity string, expire
 		RoomJoin: true,
 		Room:     roomID,
 	}
-	at.AddGrant(grant).
+	at.SetVideoGrant(grant).
 		SetIdentity(participantIdentity).
 		SetValidFor(time.Duration(expireSeconds) * time.Second)
 

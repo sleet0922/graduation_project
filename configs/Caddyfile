@@ -8,7 +8,9 @@ http://:81 {
 }
 
 https://:444 {
-    tls /etc/caddy/certs/1.pem /etc/caddy/certs/1.key
+    # The OpenRC Caddy service exports these paths. Production paths must be
+    # mounted by the operator; local runs generate an isolated short-lived certificate.
+    tls {$BOCKER_TLS_CERT} {$BOCKER_TLS_KEY}
     encode zstd gzip
 
     header {
@@ -19,7 +21,8 @@ https://:444 {
         Referrer-Policy "strict-origin-when-cross-origin"
     }
 
-    # LiveKit's signaling endpoint. Keep /rtc in the upstream request URI.
+    # LiveKit's SDK appends /rtc/v1 (or /rtc/v0) to the configured URL, and
+    # the LiveKit server expects that complete path.
     @livekit path /rtc /rtc/*
     handle @livekit {
         reverse_proxy 127.0.0.1:7880

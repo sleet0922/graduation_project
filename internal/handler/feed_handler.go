@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,6 +17,27 @@ import (
 
 type FeedHandler struct {
 	feedService service.FeedService
+}
+
+const (
+	defaultPage     = 1
+	defaultPageSize = 20
+	maxPageSize     = 50
+)
+
+// parsePagination validates query values at the HTTP boundary. The service
+// layer still normalizes direct callers, but malformed client input must not
+// silently turn into a different page or be echoed back as if it were valid.
+func parsePagination(c *fiber.Ctx) (int, int, error) {
+	page, err := strconv.Atoi(c.Query("page", strconv.Itoa(defaultPage)))
+	if err != nil || page < 1 {
+		return 0, 0, fmt.Errorf("page must be a positive integer")
+	}
+	pageSize, err := strconv.Atoi(c.Query("page_size", strconv.Itoa(defaultPageSize)))
+	if err != nil || pageSize < 1 || pageSize > maxPageSize {
+		return 0, 0, fmt.Errorf("page_size must be between 1 and %d", maxPageSize)
+	}
+	return page, pageSize, nil
 }
 
 func NewFeedHandler(feedService service.FeedService) *FeedHandler {
@@ -129,8 +151,10 @@ func (h *FeedHandler) ListFeed(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
 
 	postsWithLiked, total, err := h.feedService.ListFeed(c.Context(), userID, page, pageSize)
 	if err != nil {
@@ -162,8 +186,10 @@ func (h *FeedHandler) ListMyPosts(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusUnauthorized, errcode.Unauthorized, nil)
 	}
 
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
 
 	postsWithLiked, total, err := h.feedService.ListMyPosts(c.Context(), userID, page, pageSize)
 	if err != nil {
@@ -262,6 +288,12 @@ func (h *FeedHandler) DeleteComment(c *fiber.Ctx) error {
 	}
 
 	if err := h.feedService.DeleteComment(c.Context(), userID, req.CommentID); err != nil {
+		if errors.Is(err, service.ErrCommentNotFound) || errors.Is(err, service.ErrPostNotFound) {
+			return response.Result(c, http.StatusNotFound, errcode.NotFound, nil)
+		}
+		if errors.Is(err, service.ErrNotPostOwner) {
+			return response.Result(c, http.StatusForbidden, errcode.Forbidden, nil)
+		}
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 
@@ -284,8 +316,10 @@ func (h *FeedHandler) ListComments(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
 
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	page, pageSize, err := parsePagination(c)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
 
 	comments, total, err := h.feedService.ListComments(c.Context(), userID, uint(postID), page, pageSize)
 	if err != nil {
@@ -321,6 +355,9 @@ func (h *FeedHandler) IsLiked(c *fiber.Ctx) error {
 
 	liked, err := h.feedService.IsLiked(c.Context(), userID, uint(postID))
 	if err != nil {
+		if errors.Is(err, service.ErrPostNotFound) {
+			return response.Result(c, http.StatusNotFound, errcode.NotFound, nil)
+		}
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
 

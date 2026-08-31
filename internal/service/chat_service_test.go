@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"sleet0922/graduation_project/internal/model"
-	appredis "sleet0922/graduation_project/pkg/redis"
 
 	"github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
@@ -24,21 +23,18 @@ func mustTestJSON(t *testing.T, value any) string {
 	return string(encoded)
 }
 
-func useMiniRedis(t *testing.T) *miniredis.Miniredis {
+func useMiniRedis(t *testing.T) (*miniredis.Miniredis, *goredis.Client) {
 	t.Helper()
 	server, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("start miniredis: %v", err)
 	}
-	previousClient := appredis.RedisClient
 	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
-	appredis.RedisClient = client
 	t.Cleanup(func() {
 		_ = client.Close()
 		server.Close()
-		appredis.RedisClient = previousClient
 	})
-	return server
+	return server, client
 }
 
 func TestChatServiceRecallWindowAndOwnership(t *testing.T) {
@@ -128,6 +124,29 @@ func TestChatServiceSendSingleMessage(t *testing.T) {
 	}
 }
 
+func TestChatServiceRejectsMissingRepositoryDependencies(t *testing.T) {
+	svc := NewChatService(nil, nil)
+	if _, err := svc.SendMessage(context.Background(), 1, 2, 0, "text", "hello"); !errors.Is(err, ErrChatServiceUnavailable) {
+		t.Fatalf("SendMessage error = %v, want ErrChatServiceUnavailable", err)
+	}
+	if err := svc.MarkRead(context.Background(), 1, 2, 0); err != nil {
+		t.Fatalf("MarkRead without repository should be a no-op, got %v", err)
+	}
+}
+
+func TestChatServiceRemovesConnectionsWithoutDeliveryCallback(t *testing.T) {
+	friends := newFakeFriendRepo()
+	friends.friendships[[2]uint{1, 2}] = true
+	svc := NewChatService(friends, newFakeGroupRepo())
+	svc.RegisterConnection(context.Background(), 2, nil, nil, nil)
+	if _, err := svc.SendMessage(context.Background(), 1, 2, 0, "text", "hello"); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	if ids := svc.GetConnectionIDs(2); len(ids) != 0 {
+		t.Fatalf("connection with nil delivery callback remained: %#v", ids)
+	}
+}
+
 func TestChatServiceTracksConnectionClients(t *testing.T) {
 	ctx := context.Background()
 	svc := NewChatService(newFakeFriendRepo(), newFakeGroupRepo())
@@ -179,11 +198,11 @@ func TestChatServiceOfflineQueuesAreDrainedOnRegister(t *testing.T) {
 }
 
 func TestChatServiceDoesNotQueueOrReplayLiveDelivery(t *testing.T) {
-	server := useMiniRedis(t)
+	server, redisClient := useMiniRedis(t)
 	ctx := context.Background()
 	friendRepo := newFakeFriendRepo()
 	friendRepo.friendships[[2]uint{1, 2}] = true
-	svc := NewChatService(friendRepo, newFakeGroupRepo())
+	svc := NewChatService(friendRepo, newFakeGroupRepo(), WithRedisClient(redisClient))
 
 	deliveryCount := 0
 	connectionID := svc.RegisterConnection(ctx, 2, func(*model.ChatMessage, bool) error {
@@ -211,11 +230,11 @@ func TestChatServiceDoesNotQueueOrReplayLiveDelivery(t *testing.T) {
 }
 
 func TestChatServiceOfflineDeliveryClearsRedisCopy(t *testing.T) {
-	server := useMiniRedis(t)
+	server, redisClient := useMiniRedis(t)
 	ctx := context.Background()
 	friendRepo := newFakeFriendRepo()
 	friendRepo.friendships[[2]uint{1, 2}] = true
-	svc := NewChatService(friendRepo, newFakeGroupRepo())
+	svc := NewChatService(friendRepo, newFakeGroupRepo(), WithRedisClient(redisClient))
 
 	message, err := svc.SendMessage(ctx, 1, 2, 0, "text", "offline")
 	if err != nil {

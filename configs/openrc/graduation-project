@@ -9,12 +9,45 @@ output_log="/var/log/graduation-project/app.log"
 error_log="/var/log/graduation-project/app.log"
 
 depend() {
-	need net postgresql redis graduation-db-init
-	after livekit
+	need net postgresql redis graduation-db-init livekit
+	after graduation-db-init livekit
+}
+
+load_env() {
+	if [ -r /etc/bocker.env ]; then
+		set -a
+		. /etc/bocker.env
+		set +a
+	fi
+}
+
+wait_for_redis() {
+	local attempt=0
+	while [ "$attempt" -lt 30 ]; do
+		if redis-cli -h 127.0.0.1 -p "${REDIS_PORT:-6379}" ping >/dev/null 2>&1; then
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	return 1
+}
+
+wait_for_livekit() {
+	local attempt=0
+	while [ "$attempt" -lt 30 ]; do
+		if curl -sS --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${LIVEKIT_PORT:-7880}/" 2>/dev/null | grep -qv '^000$'; then
+			return 0
+		fi
+		attempt=$((attempt + 1))
+		sleep 1
+	done
+	return 1
 }
 
 start_pre() {
-	export ZAT_DATABASE_PASSWORD='Zyz20050922!'
-	export ZAT_DATABASE_AUTO_MIGRATE=true
+	load_env
 	checkpath -d -m 0755 /var/log/graduation-project /opt/graduation-project/logs
+	wait_for_redis || { eerror "Redis did not become ready"; return 1; }
+	wait_for_livekit || { eerror "LiveKit did not become ready"; return 1; }
 }

@@ -10,11 +10,12 @@ import (
 	"sleet0922/graduation_project/internal/model"
 	"sleet0922/graduation_project/internal/repo"
 	"sleet0922/graduation_project/pkg/logger"
-	"sleet0922/graduation_project/pkg/redis"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 var (
@@ -29,6 +30,7 @@ var (
 	ErrE2EEGroupKeyStale       = errors.New("群聊密钥版本已更新，请重新加密后重试")
 	ErrE2EEGroupKeyNotReady    = errors.New("群聊当前密钥尚未完成全员分发，请稍后重试")
 	ErrE2EEKeyStateUnavailable = errors.New("暂时无法确认服务端当前密钥状态")
+	ErrChatServiceUnavailable  = errors.New("聊天服务依赖不可用")
 )
 
 const messageRecallWindow = time.Minute
@@ -134,6 +136,7 @@ type chatService struct {
 	offline        map[uint][]*model.ChatMessage
 	systemOffline  map[uint][]*queuedSystemEvent
 	recentMessages map[string]recentChatMessage
+	redisClient    *goredis.Client
 }
 
 type ChatServiceOption func(*chatService)
@@ -142,6 +145,16 @@ func WithE2EEMessageValidation(keyRepo repo.E2EEKeyRepository, groupKeyRepo repo
 	return func(service *chatService) {
 		service.e2eeKeyRepo = keyRepo
 		service.e2eeGroupRepo = groupKeyRepo
+	}
+}
+
+// WithRedisClient injects the offline-message store used by this chat
+// service. The client is captured when the service is built, so another
+// application instance cannot redirect an existing service by mutating a
+// package-global variable.
+func WithRedisClient(client *goredis.Client) ChatServiceOption {
+	return func(service *chatService) {
+		service.redisClient = client
 	}
 }
 
@@ -404,7 +417,7 @@ func chatPushKey(userID uint) string {
 }
 
 func (s *chatService) pushRedisMessage(ctx context.Context, userID uint, message *model.ChatMessage) error {
-	if redis.RedisClient == nil {
+	if s.redisClient == nil {
 		return nil
 	}
 
@@ -413,30 +426,34 @@ func (s *chatService) pushRedisMessage(ctx context.Context, userID uint, message
 		return err
 	}
 	pushKey := chatPushKey(userID)
-	if err := redis.RedisClient.RPush(ctx, pushKey, msgBytes).Err(); err != nil {
+	if err := s.redisClient.RPush(ctx, pushKey, msgBytes).Err(); err != nil {
 		return err
 	}
-	return redis.RedisClient.Expire(ctx, pushKey, 3*24*time.Hour).Err()
+	return s.redisClient.Expire(ctx, pushKey, 3*24*time.Hour).Err()
 }
 
 // 从redis拉取消息
 func (s *chatService) drainRedisMessages(ctx context.Context, userID uint, deliveredIDs map[string]struct{}, deliver DeliveryFunc) {
-	if redis.RedisClient == nil {
+	if s.redisClient == nil {
 		return
 	}
 	pushKey := chatPushKey(userID)
-	rawList, err := redis.RedisClient.LRange(ctx, pushKey, 0, -1).Result()
+	rawList, err := s.redisClient.LRange(ctx, pushKey, 0, -1).Result()
 	if err != nil || len(rawList) == 0 {
 		return
 	}
 	for _, raw := range rawList {
 		var message model.ChatMessage
 		if err := json.Unmarshal([]byte(raw), &message); err != nil {
-			_ = redis.RedisClient.LRem(ctx, pushKey, 0, raw).Err()
+			if removeErr := s.redisClient.LRem(ctx, pushKey, 0, raw).Err(); removeErr != nil {
+				logger.Warn("failed to remove malformed offline chat message", "error", removeErr, "user_id", userID)
+			}
 			continue
 		}
 		if _, alreadyDelivered := deliveredIDs[message.ID]; alreadyDelivered {
-			_ = redis.RedisClient.LRem(ctx, pushKey, 0, raw).Err()
+			if removeErr := s.redisClient.LRem(ctx, pushKey, 0, raw).Err(); removeErr != nil {
+				logger.Warn("failed to remove duplicate offline chat message", "error", removeErr, "user_id", userID, "message_id", message.ID)
+			}
 			continue
 		}
 		if err := deliver(&message, true); err != nil {
@@ -444,7 +461,9 @@ func (s *chatService) drainRedisMessages(ctx context.Context, userID uint, deliv
 			continue
 		}
 		deliveredIDs[message.ID] = struct{}{}
-		_ = redis.RedisClient.LRem(ctx, pushKey, 0, raw).Err()
+		if removeErr := s.redisClient.LRem(ctx, pushKey, 0, raw).Err(); removeErr != nil {
+			logger.Warn("failed to remove delivered offline chat message", "error", removeErr, "user_id", userID, "message_id", message.ID)
+		}
 		logChatMessageDelivery(&message, userID, "redis_offline", "delivered")
 	}
 }
@@ -492,6 +511,10 @@ func (s *chatService) deliverToUser(ctx context.Context, userID uint, message *m
 	successCount := 0
 	failedConnectionIDs := make([]string, 0)
 	for _, connection := range connections {
+		if connection.deliver == nil {
+			failedConnectionIDs = append(failedConnectionIDs, connection.id)
+			continue
+		}
 		err := connection.deliver(message, false)
 		if err != nil {
 			failedConnectionIDs = append(failedConnectionIDs, connection.id)
@@ -527,7 +550,11 @@ func (s *chatService) sendGroupMessage(ctx context.Context, fromUserID, groupID 
 	unlockIdentityState := lockE2EEIdentityRead()
 	defer unlockIdentityState()
 	unlockGroupState := lockE2EEGroupState(groupID)
-	if s.groupRepo == nil || !s.groupRepo.IsMember(ctx, groupID, fromUserID) {
+	if s == nil || s.groupRepo == nil {
+		unlockGroupState()
+		return nil, ErrChatServiceUnavailable
+	}
+	if !s.groupRepo.IsMember(ctx, groupID, fromUserID) {
 		unlockGroupState()
 		return nil, ErrGroupMessagePermission
 	}
@@ -592,7 +619,7 @@ func (s *chatService) RegisterConnection(ctx context.Context, userID uint, deliv
 	s.mu.Unlock()
 	logger.Info("websocket connection registered", "user_id", userID, "connection_ids", connectionIDs, "connection_count", len(connectionIDs), "client", options.Client, "drain_offline", options.DrainOfflineMessages)
 	delivered := make(map[string]struct{}, len(pending))
-	if options.DrainOfflineMessages && len(pending) > 0 {
+	if options.DrainOfflineMessages && deliver != nil && len(pending) > 0 {
 		for _, message := range pending {
 			if err := deliver(message, true); err == nil {
 				delivered[message.ID] = struct{}{}
@@ -674,6 +701,9 @@ func (s *chatService) UnregisterConnection(userID uint, connectionID string) {
 
 // 发送消息
 func (s *chatService) SendMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageType string, content string) (*model.ChatMessage, error) {
+	if s == nil || s.friendRepo == nil && groupID == 0 {
+		return nil, ErrChatServiceUnavailable
+	}
 	if content == "" {
 		return nil, ErrMessageEmpty
 	}
@@ -716,6 +746,9 @@ func (s *chatService) BroadcastGroupDissolved(ctx context.Context, groupID uint,
 // RecallMessage 通知接收方（或群成员）撤回指定消息
 // 由于消息无服务端持久化，只做信令转发；客户端负责本地删除
 func (s *chatService) RecallMessage(ctx context.Context, fromUserID, toUserID, groupID uint, messageID string) error {
+	if s == nil {
+		return ErrChatServiceUnavailable
+	}
 	if messageID == "" {
 		return fmt.Errorf("message_id 不能为空")
 	}
@@ -728,6 +761,9 @@ func (s *chatService) RecallMessage(ctx context.Context, fromUserID, toUserID, g
 		"from_user":  fromUserID,
 	}
 	if groupID > 0 {
+		if s.groupRepo == nil {
+			return ErrChatServiceUnavailable
+		}
 		if !s.groupRepo.IsMember(ctx, groupID, fromUserID) {
 			return fmt.Errorf("不在该群聊中")
 		}
@@ -747,6 +783,9 @@ func (s *chatService) RecallMessage(ctx context.Context, fromUserID, toUserID, g
 		if toUserID == 0 {
 			return fmt.Errorf("to_user_id 不能为空")
 		}
+		if s.friendRepo == nil {
+			return ErrChatServiceUnavailable
+		}
 		if !s.friendRepo.CheckFriendship(ctx, fromUserID, toUserID) {
 			return fmt.Errorf("只能撤回发给好友的消息")
 		}
@@ -757,11 +796,17 @@ func (s *chatService) RecallMessage(ctx context.Context, fromUserID, toUserID, g
 
 // MarkRead 通知发送方消息已被接收方读取
 func (s *chatService) MarkRead(ctx context.Context, readerID, peerID, groupID uint) error {
+	if s == nil {
+		return ErrChatServiceUnavailable
+	}
 	payload := map[string]any{
 		"type":      "read_ack",
 		"reader_id": readerID,
 	}
 	if groupID > 0 {
+		if s.groupRepo == nil {
+			return ErrChatServiceUnavailable
+		}
 		payload["group_id"] = groupID
 		if !s.groupRepo.IsMember(ctx, groupID, readerID) {
 			return nil // 静默忽略非成员的已读
@@ -893,7 +938,9 @@ func (s *chatService) KickUserConnections(userID uint, reason string) {
 	}
 	for _, conn := range conns {
 		if conn.sysDeliver != nil {
-			_ = conn.sysDeliver(kickPayload)
+			if err := conn.sysDeliver(kickPayload); err != nil {
+				logger.Warn("failed to send kicked event", "user_id", userID, "connection_id", conn.id, "error", err)
+			}
 		}
 		if conn.closeFn != nil {
 			conn.closeFn()

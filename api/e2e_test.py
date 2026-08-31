@@ -3,10 +3,13 @@
 
 Install once in a virtualenv:
     python3 -m venv .e2e-venv
-    .e2e-venv/bin/pip install requests websocket-client livekit
+    .e2e-venv/bin/pip install -r api/requirements-e2e.txt
 
 Run against the deployed mini host:
     .e2e-venv/bin/python api/e2e_test.py
+
+For the local Bocker stack, pass ``--insecure`` for the generated certificate
+or ``--ca-bundle`` when using a trusted certificate.
 
 The test creates disposable users and removes them at the end.  Set
 E2E_KEEP_DATA=1 while debugging to keep them for inspection.
@@ -21,18 +24,32 @@ import hashlib
 import json
 import os
 import secrets
+import ssl
 import sys
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
-import requests
+try:
+    import requests
+except ImportError:  # pragma: no cover - exercised by the CLI
+    requests = None  # type: ignore[assignment]
 
 try:
     import websocket
-except ImportError as exc:  # pragma: no cover - exercised by the CLI
-    raise SystemExit("missing websocket-client; install: pip install websocket-client") from exc
+except ImportError:  # pragma: no cover - exercised by the CLI
+    websocket = None  # type: ignore[assignment]
+
+
+def require_dependencies() -> None:
+    missing = []
+    if requests is None:
+        missing.append("requests")
+    if websocket is None:
+        missing.append("websocket-client")
+    if missing:
+        raise SystemExit("missing " + ", ".join(missing) + "; install: pip install -r api/requirements-e2e.txt")
 
 
 @dataclass
@@ -46,13 +63,27 @@ class User:
 
 
 class E2E:
-    def __init__(self, base: str, http_base: str | None = None, keep: bool = False):
+    def __init__(self, base: str, http_base: str | None = None, keep: bool = False,
+                 *, insecure: bool = False, ca_bundle: str | None = None,
+                 livekit_url: str | None = None, redirect_base: str | None = None):
         self.base = base.rstrip("/")
         derived_http = self.base.replace("https://", "http://", 1).replace(":444", ":81")
         self.http_base = (http_base or derived_http).rstrip("/")
+        # Port-forwarded verification can expose the clear-text and TLS
+        # listeners on different local ports. Keep the production assertion
+        # strict by default, while allowing the expected public HTTPS base to
+        # be declared explicitly for that test harness.
+        self.redirect_base = (redirect_base or self.base).rstrip("/")
         self.ws_base = self.base.replace("https://", "wss://").replace("http://", "ws://")
         self.http = requests.Session()
-        self.http.verify = True
+        self.insecure = insecure
+        self.ca_bundle = ca_bundle
+        # The API returns the canonical LiveKit URL, but deployments may expose
+        # the media/signalling listener through a different test-only address
+        # (for example a direct Incus port mapping). Keep the API contract
+        # assertion while allowing the transport endpoint to be overridden.
+        self.livekit_url = livekit_url.rstrip("/") if livekit_url else None
+        self.http.verify = False if insecure else (ca_bundle or True)
         self.keep = keep
         self.users: list[User] = []
         self.group_id = 0
@@ -106,7 +137,7 @@ class E2E:
             response = self.http.get(self.http_base + "/health", allow_redirects=False, timeout=10)
             location = response.headers.get("Location", "")
             self.check("HTTP listener redirects to HTTPS", response.status_code in (301, 308) and
-                       location.startswith(self.base + "/"),
+                       location.startswith(self.redirect_base + "/"),
                        f"HTTP {response.status_code}, Location={location!r}")
         except requests.RequestException as exc:
             self.check("HTTP listener redirects to HTTPS", False, str(exc))
@@ -129,6 +160,16 @@ class E2E:
 
     def user_flow(self, a: User, b: User):
         self.request("health", "GET", "/health")
+        for path in ("/healthz", "/livez"):
+            payload = self.request(f"health alias {path}", "GET", path)
+            self.check(f"health alias payload {path}", payload.get("status") == "ok", str(payload))
+        live = self.request("liveness probe", "GET", "/health/live")
+        self.check("liveness probe payload", live.get("status") == "ok", str(live))
+        ready = self.request("readiness probe", "GET", "/health/ready")
+        self.check("readiness probe payload", ready.get("status") == "ok", str(ready))
+        for path in ("/ready", "/readyz"):
+            payload = self.request(f"readiness alias {path}", "GET", path)
+            self.check(f"readiness alias payload {path}", payload.get("status") == "ok", str(payload))
         refreshed = self.request("refresh access/refresh tokens", "POST", "/api/user/refresh",
                                 body={"refresh_token": a.refresh})
         fresh = self.data(refreshed) or {}
@@ -232,8 +273,14 @@ class E2E:
 
     def ws_connect(self, name: str, user: User, endpoint: str) -> websocket.WebSocket:
         url = self.ws_base + endpoint
+        sslopt: dict[str, Any] = {}
+        if self.insecure:
+            sslopt["cert_reqs"] = ssl.CERT_NONE
+        elif self.ca_bundle:
+            sslopt["ca_certs"] = self.ca_bundle
         sock = websocket.create_connection(url, timeout=10, header=[f"Authorization: Bearer {user.token}"],
-                                            origin=self.base, http_proxy_host=None)
+                                            origin=self.base, http_proxy_host=None,
+                                            http_proxy_port=None, http_no_proxy=["*"], sslopt=sslopt)
         first = json.loads(sock.recv())
         self.check(f"{name} websocket connected", first.get("type") == "connected", str(first))
         self.ws[name] = sock
@@ -367,8 +414,10 @@ class E2E:
             self.check("LiveKit token payload", False, f"A={da} B={db}")
             return False
         room_a, room_b = rtc.Room(), rtc.Room()
+        connect_url = self.livekit_url or str(da["url"])
         try:
-            await asyncio.gather(room_a.connect(da["url"], da["token"]), room_b.connect(db["url"], db["token"]))
+            await asyncio.gather(room_a.connect(connect_url, da["token"]),
+                                 room_b.connect(connect_url, db["token"]))
             self.check("LiveKit rooms connected", room_a.connection_state == rtc.ConnectionState.CONN_CONNECTED and
                        room_b.connection_state == rtc.ConnectionState.CONN_CONNECTED,
                        f"{room_a.connection_state}/{room_b.connection_state}")
@@ -441,8 +490,19 @@ def main() -> int:
     parser.add_argument("--http-base", default=os.getenv("E2E_HTTP_BASE_URL"),
                         help="clear-text HTTP listener, default derives :81 from --base")
     parser.add_argument("--keep-data", action="store_true", default=os.getenv("E2E_KEEP_DATA") == "1")
+    parser.add_argument("--insecure", action="store_true", default=os.getenv("E2E_INSECURE") == "1",
+                        help="disable HTTPS certificate verification (for local self-signed TLS)")
+    parser.add_argument("--ca-bundle", default=os.getenv("E2E_CA_BUNDLE"),
+                        help="CA bundle used for HTTPS and WebSocket verification")
+    parser.add_argument("--livekit-url", default=os.getenv("E2E_LIVEKIT_URL"),
+                        help="override the LiveKit transport URL returned by the API")
+    parser.add_argument("--redirect-base", default=os.getenv("E2E_REDIRECT_BASE"),
+                        help="expected HTTPS base in the HTTP redirect (for port-forwarded tests)")
     args = parser.parse_args()
-    return E2E(args.base, args.http_base, args.keep_data).run()
+    require_dependencies()
+    return E2E(args.base, args.http_base, args.keep_data,
+               insecure=args.insecure, ca_bundle=args.ca_bundle,
+               livekit_url=args.livekit_url, redirect_base=args.redirect_base).run()
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ func (k *QiniuKodo) UploadFile(ctx context.Context, file *multipart.FileHeader, 
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %v", err)
 	}
-	defer openedFile.Close()
+	defer func() { _ = openedFile.Close() }()
 
 	fileName := fmt.Sprintf("%d_%s", time.Now().Unix(), strings.ReplaceAll(file.Filename, " ", "_"))
 	basePath := strings.Trim(k.config.BasePath, "/")

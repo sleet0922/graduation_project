@@ -17,10 +17,14 @@ temp/
 
 main
 app
+!internal/app/
+!internal/app/*.go
 nohup.out
 .idea/
 app.log
 .codex
+ssl/*.pem
+ssl/*.key
 logs/app.log
 
 # Python E2E test artifacts

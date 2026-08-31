@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sleet0922/graduation_project/pkg/errcode"
-	"sleet0922/graduation_project/pkg/logger"
 	"strings"
 	"time"
 
@@ -28,7 +27,12 @@ func maskTokenInQuery(raw string) string {
 }
 
 // Logger 请求日志中间件
-func Logger() fiber.Handler {
+
+func Logger(loggers ...*slog.Logger) fiber.Handler {
+	log := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		log = loggers[0]
+	}
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
 		path := c.Path()
@@ -37,7 +41,7 @@ func Logger() fiber.Handler {
 		err := c.Next()
 
 		cost := time.Since(start)
-		logger.Info(path,
+		log.Info(path,
 			slog.Int("status", c.Response().StatusCode()),
 			slog.String("method", c.Method()),
 			slog.String("ip", c.IP()),
@@ -49,20 +53,26 @@ func Logger() fiber.Handler {
 }
 
 // Recovery panic 恢复中间件
-func Recovery() fiber.Handler {
+func Recovery(loggers ...*slog.Logger) fiber.Handler {
+	log := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		log = loggers[0]
+	}
 	return func(c *fiber.Ctx) error {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("[Recovery from panic]",
+				log.Error("[Recovery from panic]",
 					slog.Any("error", r),
 					slog.String("path", c.Path()),
 					slog.String("stack", string(debug.Stack())),
 				)
-				_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				if err := c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"code":    errcode.InternalServerError,
 					"message": errcode.GetMsg(errcode.InternalServerError),
 					"data":    nil,
-				})
+				}); err != nil {
+					log.Error("failed to write panic response", slog.Any("error", err))
+				}
 			}
 		}()
 		return c.Next()

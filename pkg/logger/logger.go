@@ -1,11 +1,13 @@
 package logger
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"sleet0922/graduation_project/internal/config"
@@ -13,22 +15,37 @@ import (
 
 // 全局实例
 var Log *slog.Logger
+var activeCloser io.Closer
 
-// 从viper读取配置,初始化
-func InitLogger(cfg *config.ViperConfig) {
-	// 日志相关配置(文件路径、级别)
-	logConfig := cfg.Log
-	// 判断是否开发环境
-	isDev := cfg.Server.Mode != "release"
+type closeFunc struct {
+	once sync.Once
+	fn   func() error
+	err  error
+}
 
-	// 创建日志文件夹 + 文件
-	err := os.MkdirAll(filepath.Dir(logConfig.Filename), os.ModePerm)
-	if err != nil {
-		panic("创建日志目录失败：" + err.Error())
+func (f *closeFunc) Close() error {
+	f.once.Do(func() { f.err = f.fn() })
+	return f.err
+}
+
+// New creates a configured logger without changing the process-wide default.
+// The returned closer releases the log file when the application shuts down.
+func New(cfg *config.ViperConfig) (*slog.Logger, io.Closer, error) {
+	if cfg == nil {
+		return nil, nil, fmt.Errorf("logger config is nil")
 	}
-	logFile, err := os.OpenFile(logConfig.Filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+
+	logFilename := strings.TrimSpace(cfg.Log.Filename)
+	if logFilename == "" {
+		return nil, nil, fmt.Errorf("logger filename is empty")
+	}
+	logDir := filepath.Dir(logFilename)
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return nil, nil, fmt.Errorf("create logger directory %q: %w", logDir, err)
+	}
+	logFile, err := os.OpenFile(logFilename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
-		panic("打开日志文件失败: " + err.Error())
+		return nil, nil, fmt.Errorf("open logger file %q: %w", logFilename, err)
 	}
 
 	opts := &slog.HandlerOptions{
@@ -47,11 +64,9 @@ func InitLogger(cfg *config.ViperConfig) {
 			if a.Key == slog.SourceKey {
 				source, ok := a.Value.Any().(*slog.Source)
 				if ok && source != nil {
-					// 查找 /pkg 在路径中的位置
 					if idx := strings.Index(source.File, "/pkg"); idx != -1 {
 						source.File = source.File[idx:]
 					}
-					// 处理 function 路径
 					if idx := strings.Index(source.Function, "/pkg"); idx != -1 {
 						source.Function = source.Function[idx:]
 					}
@@ -60,21 +75,69 @@ func InitLogger(cfg *config.ViperConfig) {
 			return a
 		},
 	}
-
-	var handler slog.Handler
-	multiWriter := io.MultiWriter(os.Stdout, logFile)
-	if isDev {
-		// 开发环境：文本格式
-		opts.AddSource = false
-		handler = slog.NewTextHandler(multiWriter, opts)
-	} else {
-		// 生产环境：JSON格式
-		opts.AddSource = true
-		handler = slog.NewJSONHandler(multiWriter, opts)
+	switch strings.ToLower(strings.TrimSpace(cfg.Log.Level)) {
+	case "", "info":
+		opts.Level = slog.LevelInfo
+	case "debug":
+		opts.Level = slog.LevelDebug
+	case "warn", "warning":
+		opts.Level = slog.LevelWarn
+	case "error":
+		opts.Level = slog.LevelError
+	default:
+		_ = logFile.Close()
+		return nil, nil, fmt.Errorf("invalid logger level %q", cfg.Log.Level)
 	}
 
-	Log = slog.New(handler)
-	slog.SetDefault(Log)
+	var slogHandler slog.Handler
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	if !strings.EqualFold(strings.TrimSpace(cfg.Server.Mode), "release") {
+		opts.AddSource = false
+		slogHandler = slog.NewTextHandler(multiWriter, opts)
+	} else {
+		opts.AddSource = true
+		slogHandler = slog.NewJSONHandler(multiWriter, opts)
+	}
+
+	return slog.New(slogHandler), &closeFunc{fn: logFile.Close}, nil
+}
+
+// Setup creates and installs the process-wide logger used by legacy handlers.
+// New code should prefer passing a *slog.Logger explicitly where practical.
+func Setup(cfg *config.ViperConfig) (io.Closer, error) {
+	configured, closer, err := New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if activeCloser != nil {
+		_ = activeCloser.Close()
+	}
+	Log = configured
+	slog.SetDefault(configured)
+	activeCloser = closer
+	return closer, nil
+}
+
+// Close releases the currently configured log file, if any.
+func Close() error {
+	if activeCloser == nil {
+		return nil
+	}
+	err := activeCloser.Close()
+	activeCloser = nil
+	return err
+}
+
+// 从viper读取配置,初始化
+func InitLogger(cfg *config.ViperConfig) error {
+	closer, err := Setup(cfg)
+	if err != nil {
+		return err
+	}
+	// The application owns the closer through Setup. Keep this wrapper for
+	// callers that only need process-wide initialization.
+	_ = closer
+	return nil
 }
 
 // 日志级别函数
