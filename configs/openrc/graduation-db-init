@@ -8,21 +8,9 @@ depend() {
 	before graduation-project
 }
 
-load_env() {
-	if [ -r /etc/bocker.env ]; then
-		set -a
-		. /etc/bocker.env
-		set +a
-	fi
-}
-
 start() {
-	load_env
-	local password="${ZAT_DATABASE_PASSWORD:-}"
-	if [ -z "$password" ]; then
-		eerror "ZAT_DATABASE_PASSWORD is required"
-		return 1
-	fi
+	# 与 configs/config.yaml 的 database.password 保持一致。
+	local password='Zyz20050922!'
 
 	ebegin "Configuring graduation-project PostgreSQL role and database"
 	local escaped_password

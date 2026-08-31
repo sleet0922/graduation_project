@@ -4,9 +4,9 @@ bind_addresses:
 rtc:
   tcp_port: 7881
   udp_port: 7882
-  use_external_ip: false
+  use_external_ip: true
 redis:
   address: 127.0.0.1:6379
-# The OpenRC livekit service writes a runtime config with the configured key/secret.
-# Keeping this template credential-free prevents secrets entering images.
-keys: {}
+# 需与 configs/config.yaml 中 livekit 的 api_key/api_secret 保持一致。
+keys:
+  graduation-project: graduation-project-livekit-secret-2026

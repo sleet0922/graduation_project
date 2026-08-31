@@ -8,9 +8,7 @@ http://:81 {
 }
 
 https://:444 {
-    # The OpenRC Caddy service exports these paths. Production paths must be
-    # mounted by the operator; local runs generate an isolated short-lived certificate.
-    tls {$BOCKER_TLS_CERT} {$BOCKER_TLS_KEY}
+    tls /etc/caddy/certs/1.pem /etc/caddy/certs/1.key
     encode zstd gzip
 
     header {

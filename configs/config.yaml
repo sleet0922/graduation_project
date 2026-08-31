@@ -4,32 +4,33 @@ server:
 
 database:
   username: "sleet"
-  # Inject ZAT_DATABASE_PASSWORD at runtime. The OpenRC services read it from
-  # the Bocker-provided environment file.
-  password: "SET_ZAT_DATABASE_PASSWORD_IN_ENVIRONMENT"
+  # 与 configs/openrc/graduation-db-init 中初始化的密码保持一致。
+  password: "Zyz20050922!"
   host: "127.0.0.1"
   port: 5432
   dbname: "graduation_project"
   charset: "utf8mb4"
-  auto_migrate: false
+  auto_migrate: true
 
 oss:
-  access_key_id: "SET_ZAT_OSS_ACCESS_KEY_ID_IN_ENVIRONMENT"
-  secret_access_key: "SET_ZAT_OSS_SECRET_ACCESS_KEY_IN_ENVIRONMENT"
+  access_key_id: "0CsZkaRGG_4IifjzH4NOcMN4jGbngAoNoZBK7rsQ"
+  secret_access_key: "S3flntD41AG3rS75BdcRR3Yrb-Y_PxIjRgvFT7W1"
   bucket: "sleet"
   endpoint: "https://s3-cn-east-1.qiniucs.com"
   base_path: ""
-  cdn_domain: "http://cdn.gelsomino.cn"
+  cdn_domain: "https://cdn.gelsomino.cn"
 
 jwt:
-  secret_key: "SET_ZAT_JWT_SECRET_IN_ENVIRONMENT"
+  secret_key: "89$kL789&*pO0987654321qWERTYuiop[]{}|;:,.<>?/!@#$%^&*()_+"
   access_token_expire_seconds: 86400
   refresh_token_expire_seconds: 2592000
 
 livekit:
-  url: "SET_ZAT_LIVEKIT_URL_IN_ENVIRONMENT"
-  api_key: "SET_ZAT_LIVEKIT_API_KEY_IN_ENVIRONMENT"
-  api_secret: "SET_ZAT_LIVEKIT_API_SECRET_IN_ENVIRONMENT"
+  # Caddy 在同一入口代理 LiveKit 信令；需与 Incusfile 的 domain 保持一致。
+  # api_key/api_secret 需与 configs/livekit.yaml 的 keys 一致。
+  url: "wss://mini.gelsomino.cn:444"
+  api_key: "graduation-project"
+  api_secret: "graduation-project-livekit-secret-2026"
   token_expire_seconds: 7200
 
 log:

@@ -13,14 +13,6 @@ depend() {
 	after graduation-db-init livekit
 }
 
-load_env() {
-	if [ -r /etc/bocker.env ]; then
-		set -a
-		. /etc/bocker.env
-		set +a
-	fi
-}
-
 wait_for_redis() {
 	local attempt=0
 	while [ "$attempt" -lt 30 ]; do
@@ -46,7 +38,6 @@ wait_for_livekit() {
 }
 
 start_pre() {
-	load_env
 	checkpath -d -m 0755 /var/log/graduation-project /opt/graduation-project/logs
 	wait_for_redis || { eerror "Redis did not become ready"; return 1; }
 	wait_for_livekit || { eerror "LiveKit did not become ready"; return 1; }
