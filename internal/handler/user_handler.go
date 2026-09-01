@@ -27,6 +27,48 @@ const (
 	maxPasswordLen = 128
 )
 
+// 验证密码强度：至少包含大小写字母、数字中的两种
+func validatePasswordStrength(password string) error {
+	if len(password) < minPasswordLen {
+		return fmt.Errorf("密码长度不得少于%d位", minPasswordLen)
+	}
+	if len(password) > maxPasswordLen {
+		return fmt.Errorf("密码长度不得超过%d位", maxPasswordLen)
+	}
+
+	hasLower := false
+	hasUpper := false
+	hasDigit := false
+
+	for _, ch := range password {
+		if ch >= 'a' && ch <= 'z' {
+			hasLower = true
+		} else if ch >= 'A' && ch <= 'Z' {
+			hasUpper = true
+		} else if ch >= '0' && ch <= '9' {
+			hasDigit = true
+		}
+	}
+
+	// 至少包含两种字符类型
+	count := 0
+	if hasLower {
+		count++
+	}
+	if hasUpper {
+		count++
+	}
+	if hasDigit {
+		count++
+	}
+
+	if count < 2 {
+		return fmt.Errorf("密码必须包含大小写字母、数字中的至少两种")
+	}
+
+	return nil
+}
+
 type UserHandler struct {
 	userService           service.UserService
 	chatService           service.ChatService
@@ -145,11 +187,8 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 	if !emailRegex.MatchString(req.Email) {
 		return response.Error(c, http.StatusBadRequest, "邮箱格式不正确")
 	}
-	if len(req.Password) < minPasswordLen {
-		return response.Error(c, http.StatusBadRequest, "密码长度不得少于8位")
-	}
-	if len(req.Password) > maxPasswordLen {
-		return response.Error(c, http.StatusBadRequest, "密码长度不得超过128位")
+	if err := validatePasswordStrength(req.Password); err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	user, err := h.userService.Register(c.Context(), req.Email, req.Password)
 	if err != nil {
@@ -317,7 +356,7 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 		return response.Result(c, http.StatusInternalServerError, errcode.ErrorTokenGenerate, nil)
 	}
 	if err := h.sessionStore.RotateRefreshTokenID(claims.UserID, claims.SessionID, claims.RefreshID, newRefreshID, h.refreshTokenExpiresIn); err != nil {
-		slog.Warn("RotateRefreshTokenID failed", slog.Any("user_id", claims.UserID), slog.Any("error", err))
+		slog.Error("RotateRefreshTokenID failed", slog.Any("user_id", claims.UserID), slog.Any("error", err))
 		return response.Result(c, http.StatusUnauthorized, errcode.ErrorTokenParse, nil)
 	}
 	if err := h.sessionStore.ExpireUserSession(claims.UserID, h.refreshTokenExpiresIn); err != nil {
@@ -395,11 +434,8 @@ func (h *UserHandler) UpdatePassword(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil || req.Password == "" || req.NewPassword == "" {
 		return response.Result(c, http.StatusBadRequest, errcode.InvalidParams, nil)
 	}
-	if len(req.NewPassword) < minPasswordLen {
-		return response.Error(c, http.StatusBadRequest, "新密码长度不得少于8位")
-	}
-	if len(req.NewPassword) > maxPasswordLen {
-		return response.Error(c, http.StatusBadRequest, "新密码长度不得超过128位")
+	if err := validatePasswordStrength(req.NewPassword); err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	userID, err := GetUserID(c)
 	if err != nil {
@@ -415,7 +451,18 @@ func (h *UserHandler) UpdatePassword(c *fiber.Ctx) error {
 		}
 		return response.Result(c, http.StatusInternalServerError, errcode.InternalServerError, nil)
 	}
-	return response.Success(c, nil, "更新密码成功")
+
+	// 密码修改成功后，使所有旧session失效，强制重新登录
+	if err := h.sessionStore.DelUserSession(userID); err != nil {
+		slog.Error("DelUserSession failed after password update", slog.Any("user_id", userID), slog.Any("error", err))
+	}
+
+	// 踢掉所有WebSocket连接
+	if h.chatService != nil {
+		h.chatService.KickUserConnections(userID, "密码已修改，请重新登录")
+	}
+
+	return response.Success(c, nil, "更新密码成功，请重新登录")
 }
 
 // 用户更新资料

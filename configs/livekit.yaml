@@ -4,7 +4,10 @@ bind_addresses:
 rtc:
   tcp_port: 7881
   udp_port: 7882
-  use_external_ip: true
+  # 在容器环境中使用本地IP，不尝试解析外部IP
+  use_external_ip: false
+  # 明确指定节点IP为localhost，适用于单机部署
+  node_ip: 127.0.0.1
 redis:
   address: 127.0.0.1:6379
 # 需与 configs/config.yaml 中 livekit 的 api_key/api_secret 保持一致。

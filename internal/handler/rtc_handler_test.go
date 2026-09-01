@@ -58,6 +58,10 @@ func (s *fakeRTCService) IssueToken(ctx context.Context, userID uint, req servic
 	return &service.RTCTokenPayload{URL: "http://localhost:7880", RoomID: req.RoomID, UID: "7", Token: "token"}, nil
 }
 
+func (s *fakeRTCService) Close() error {
+	return nil
+}
+
 func TestRTCHandlerInviteAndToken(t *testing.T) {
 	handler := NewRTCHandler(&fakeRTCService{})
 	app := fiber.New()

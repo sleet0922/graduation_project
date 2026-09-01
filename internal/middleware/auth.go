@@ -83,6 +83,7 @@ func (m *JWTMiddleware) Auth() fiber.Handler {
 		c.Locals("user_id", uint(claims.UserID))
 		c.Locals("account", claims.Account)
 		c.Locals("session_id", claims.SessionID)
+		c.Locals("user_agent", c.Get("User-Agent"))
 		return c.Next()
 	}
 }

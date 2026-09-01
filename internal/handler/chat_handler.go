@@ -19,11 +19,13 @@ type ChatHandler struct {
 	chatService               service.ChatService
 	rtcService                service.RTCService
 	foregroundDisconnectGrace time.Duration
+	wsReadTimeout             time.Duration
 	disconnectMu              sync.Mutex
 	disconnectTimers          map[uint]*time.Timer
 }
 
 const defaultForegroundDisconnectGrace = 3 * time.Second
+const defaultWSReadTimeout = 90 * time.Second // WebSocket读超时，客户端应每60秒发送一次ping
 
 type chatIncomingMessage struct {
 	Type            string `json:"type"`
@@ -50,6 +52,7 @@ func NewChatHandler(chatService service.ChatService, rtcService service.RTCServi
 		chatService:               chatService,
 		rtcService:                rtcService,
 		foregroundDisconnectGrace: defaultForegroundDisconnectGrace,
+		wsReadTimeout:             defaultWSReadTimeout,
 		disconnectTimers:          make(map[uint]*time.Timer),
 	}
 }
@@ -72,23 +75,23 @@ func (h *ChatHandler) scheduleForegroundDisconnect(userID uint) {
 	if previous := h.disconnectTimers[userID]; previous != nil {
 		previous.Stop()
 	}
-	var timer *time.Timer
-	timer = time.AfterFunc(h.foregroundDisconnectGrace, func() {
-		h.disconnectMu.Lock()
-		if h.disconnectTimers[userID] != timer {
-			h.disconnectMu.Unlock()
-			return
-		}
-		delete(h.disconnectTimers, userID)
-		h.disconnectMu.Unlock()
 
+	// 创建timer，在回调中检查连接状态
+	timer := time.AfterFunc(h.foregroundDisconnectGrace, func() {
+		// 检查是否还有前台连接
 		if h.chatService.HasConnectionClient(userID, "foreground") {
 			return
 		}
 		if err := h.rtcService.HandleParticipantDisconnected(context.Background(), userID); err != nil {
 			logger.Warn("failed to terminate rtc call after websocket disconnect", slog.Any("user_id", userID), slog.Any("error", err))
 		}
+
+		// 回调完成后清理timer引用
+		h.disconnectMu.Lock()
+		delete(h.disconnectTimers, userID)
+		h.disconnectMu.Unlock()
 	})
+
 	h.disconnectTimers[userID] = timer
 	h.disconnectMu.Unlock()
 }
@@ -96,6 +99,13 @@ func (h *ChatHandler) scheduleForegroundDisconnect(userID uint) {
 // 建立聊天 WebSocket 连接
 func (h *ChatHandler) Connect() fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
+		// 添加panic保护，确保连接清理
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("websocket handler panic", slog.Any("panic", r))
+			}
+		}()
+
 		userID, ok := c.Locals("user_id").(uint)
 		if !ok || userID == 0 {
 			if err := c.WriteJSON(chatOutgoingMessage{Type: "error", Error: "未授权"}); err != nil {
@@ -157,11 +167,26 @@ func (h *ChatHandler) Connect() fiber.Handler {
 			}
 		}()
 
+		// 设置读超时，防止僵尸连接
+		lastActivity := time.Now()
+
 		for {
-			var incoming chatIncomingMessage
-			if err := c.ReadJSON(&incoming); err != nil {
+			// 设置读超时
+			if err := c.SetReadDeadline(time.Now().Add(h.wsReadTimeout)); err != nil {
+				logger.Warn("failed to set websocket read deadline", slog.Any("user_id", userID), slog.Any("error", err))
 				return
 			}
+
+			var incoming chatIncomingMessage
+			if err := c.ReadJSON(&incoming); err != nil {
+				// 检查是否是超时错误
+				if time.Since(lastActivity) > h.wsReadTimeout {
+					logger.Info("websocket connection timeout", slog.Any("user_id", userID), slog.String("connection_id", connectionID))
+				}
+				return
+			}
+
+			lastActivity = time.Now()
 
 			if incoming.Type != "chat" {
 				switch incoming.Type {

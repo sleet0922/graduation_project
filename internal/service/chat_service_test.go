@@ -274,11 +274,11 @@ func TestChatServiceOfflineDeliveryClearsRedisCopy(t *testing.T) {
 }
 
 func TestInspectChatEnvelope(t *testing.T) {
-	metadata := inspectChatEnvelope(`{"e2ee":1,"v":"x25519+chacha20poly1305:v1","key_id":"0123456789abcdef","nonce":"secret","ct":"secret"}`)
+	metadata := extractChatEnvelopeMetadata(`{"e2ee":1,"v":"x25519+chacha20poly1305:v1","key_id":"0123456789abcdef","nonce":"secret","ct":"secret"}`)
 	if metadata.E2EE != 1 || metadata.Version != "x25519+chacha20poly1305:v1" || metadata.KeyID != "0123456789abcdef" {
 		t.Fatalf("metadata = %#v", metadata)
 	}
-	if metadata := inspectChatEnvelope("plain text"); metadata.E2EE != 0 || metadata.KeyID != "" {
+	if metadata := extractChatEnvelopeMetadata("plain text"); metadata.E2EE != 0 || metadata.KeyID != "" {
 		t.Fatalf("plain text metadata = %#v, want empty", metadata)
 	}
 }

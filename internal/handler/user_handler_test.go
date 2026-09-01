@@ -170,7 +170,7 @@ func TestUserHandlerAuthenticatedEndpoints(t *testing.T) {
 		t.Fatalf("unauth self response = status %d payload %#v", status, payload)
 	}
 
-	status, payload = testResponse(t, app, testJSONRequest("POST", "/password", map[string]any{"password": "old-password", "new_password": "new-password"}))
+	status, payload = testResponse(t, app, testJSONRequest("POST", "/password", map[string]any{"password": "OldPass123", "new_password": "NewPass456"}))
 	if status != http.StatusUnauthorized || int(payload["code"].(float64)) != errcode.ErrorPasswordCheck {
 		t.Fatalf("password response = status %d payload %#v, want old password error", status, payload)
 	}

@@ -37,6 +37,15 @@ const messageRecallWindow = time.Minute
 
 const chatPushKeyPrefix = "chat:push:v2:"
 
+// E2EE加密参数常量
+const (
+	e2eeNonceLength      = 12 // ChaCha20-Poly1305 nonce长度
+	e2eeAuthTagLength    = 16 // Poly1305 认证标签长度
+	e2eePublicKeyLength  = 32 // X25519公钥长度
+	e2eeKeyIDLength      = 8  // 密钥ID长度（十六进制字符）
+	e2eePublicKeyIDBytes = 32 // 公钥SHA256哈希长度
+)
+
 type chatEnvelopeMetadata struct {
 	E2EE           int    `json:"e2ee"`
 	Version        string `json:"v"`
@@ -177,7 +186,7 @@ func NewChatService(friendRepo repo.FriendRepository, groupRepo repo.GroupReposi
 
 func e2eePublicKeyID(publicKey string) (string, error) {
 	decoded, err := decodeBase64URLOrStd(strings.TrimSpace(publicKey))
-	if err != nil || len(decoded) != 32 {
+	if err != nil || len(decoded) != e2eePublicKeyLength {
 		return "", ErrE2EEMessageMalformed
 	}
 	digest := sha256.Sum256(decoded)
@@ -195,10 +204,10 @@ func validE2EEHexID(value string, byteLength int) bool {
 func validateE2EEEnvelopeEncoding(metadata chatEnvelopeMetadata) error {
 	nonce, nonceErr := decodeBase64URLOrStd(strings.TrimSpace(metadata.Nonce))
 	cipherText, cipherTextErr := decodeBase64URLOrStd(strings.TrimSpace(metadata.CipherText))
-	if nonceErr != nil || len(nonce) != 12 || cipherTextErr != nil || len(cipherText) <= 16 {
+	if nonceErr != nil || len(nonce) != e2eeNonceLength || cipherTextErr != nil || len(cipherText) <= e2eeAuthTagLength {
 		return ErrE2EEMessageMalformed
 	}
-	if !validE2EEHexID(metadata.SenderKeyID, 32) {
+	if !validE2EEHexID(metadata.SenderKeyID, e2eePublicKeyIDBytes) {
 		return ErrE2EEMessageMalformed
 	}
 	return nil
@@ -283,8 +292,8 @@ func (s *chatService) validateE2EEMessage(ctx context.Context, fromUserID, toUse
 
 	if metadata.Version != "x25519+chacha20poly1305:v1" ||
 		metadata.Scope != "" || metadata.GroupID != 0 ||
-		!validE2EEHexID(metadata.KeyID, 8) ||
-		!validE2EEHexID(metadata.RecipientKeyID, 32) {
+		!validE2EEHexID(metadata.KeyID, e2eeKeyIDLength) ||
+		!validE2EEHexID(metadata.RecipientKeyID, e2eePublicKeyIDBytes) {
 		return ErrE2EEMessageMalformed
 	}
 	recipientKeyID, err := s.currentE2EEPublicKeyID(ctx, toUserID)
@@ -365,8 +374,8 @@ func clonePayload(payload any) (any, error) {
 	return cloned, nil
 }
 
-// 推送到redis
-func inspectChatEnvelope(content string) chatEnvelopeMetadata {
+// 提取聊天消息的E2EE元数据用于日志记录
+func extractChatEnvelopeMetadata(content string) chatEnvelopeMetadata {
 	var metadata chatEnvelopeMetadata
 	if err := json.Unmarshal([]byte(content), &metadata); err != nil || metadata.E2EE != 1 {
 		return chatEnvelopeMetadata{}
@@ -383,7 +392,7 @@ func inspectChatEnvelope(content string) chatEnvelopeMetadata {
 }
 
 func chatMessageLogArgs(message *model.ChatMessage, recipientUserID uint, source, result string) []any {
-	metadata := inspectChatEnvelope(message.Content)
+	metadata := extractChatEnvelopeMetadata(message.Content)
 	args := []any{
 		"message_id", message.ID,
 		"from_user_id", message.FromUserID,

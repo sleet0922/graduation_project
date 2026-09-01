@@ -39,6 +39,7 @@ type RTCService interface {
 	Hangup(ctx context.Context, userID uint, req RTCCallIDRequest) error
 	HandleParticipantDisconnected(ctx context.Context, userID uint) error
 	IssueToken(ctx context.Context, userID uint, req RTCIssueTokenRequest) (*RTCTokenPayload, error)
+	Close() error
 }
 
 type RTCInviteRequest struct {
@@ -248,12 +249,12 @@ func normalizeRejectReason(reason string) string {
 	return "rejected"
 }
 
-// 检查是否为支持的密钥盒格式
+// 检查数组是否包含指定值
 func containsUint(values []uint, target uint) bool {
 	return slices.Contains(values, target)
 }
 
-// 检查是否为支持的密钥盒格式
+// 检查通话状态是否为终止状态
 func isTerminalStatus(status string) bool {
 	switch status {
 	case rtcCallStatusRejected, rtcCallStatusCanceled, rtcCallStatusEnded, rtcCallStatusTimeout:
@@ -263,7 +264,7 @@ func isTerminalStatus(status string) bool {
 	}
 }
 
-// 规范化成员ID列表
+// 释放通话资源
 func (s *rtcService) releaseCall(callID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -278,7 +279,7 @@ func (s *rtcService) releaseCall(callID string) {
 	logger.Info("rtc call released", "call_id", callID)
 }
 
-// 规范化成员ID列表
+// 序列化payload为JSON字符串，用于日志记录
 func mustJSON(payload any) string {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -287,13 +288,10 @@ func mustJSON(payload any) string {
 	return string(data)
 }
 
-// 规范化成员ID列表
 func (s *rtcService) scheduleTimeout(callID string) {
-	timer := time.NewTimer(s.inviteTTL)
-	defer timer.Stop()
 	select {
-	case <-timer.C:
-		// 正常超时
+	case <-time.After(s.inviteTTL):
+		// 正常超时，继续处理
 	case <-s.shutdownCtx.Done():
 		// 服务关闭，直接退出，不推送通知
 		return
@@ -742,4 +740,13 @@ func (s *rtcService) IssueToken(ctx context.Context, userID uint, req RTCIssueTo
 		UID:    uid,
 		Token:  token,
 	}, nil
+}
+
+// Close 关闭RTC服务，取消所有pending的定时器
+func (s *rtcService) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.shutdownCancel()
+	return nil
 }

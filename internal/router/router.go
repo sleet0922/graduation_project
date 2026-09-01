@@ -269,29 +269,43 @@ func tokenTTL(seconds int, fallback time.Duration) time.Duration {
 
 func registerHealthRoutes(r *fiber.App, checks []ReadinessCheck, logger *slog.Logger) {
 	liveness := func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok"})
+		return c.JSON(fiber.Map{
+			"status":  "ok",
+			"version": "1.0.0",
+			"time":    time.Now().Unix(),
+		})
 	}
 	readiness := func(c *fiber.Ctx) error {
 		ctx := c.UserContext()
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		statuses := make(map[string]string, len(checks))
+		statuses := make(map[string]any, len(checks))
 		ready := true
 		for _, check := range checks {
 			if strings.TrimSpace(check.Name) == "" || check.Check == nil {
 				ready = false
 				continue
 			}
+			start := time.Now()
 			if err := check.Check(ctx); err != nil {
 				ready = false
-				statuses[check.Name] = "error"
+				statuses[check.Name] = fiber.Map{
+					"status":      "error",
+					"error":       err.Error(),
+					"latency_ms":  time.Since(start).Milliseconds(),
+					"checked_at":  time.Now().Unix(),
+				}
 				if logger != nil {
 					logger.Warn("readiness check failed", "check", check.Name, "error", err)
 				}
 				continue
 			}
-			statuses[check.Name] = "ok"
+			statuses[check.Name] = fiber.Map{
+				"status":     "ok",
+				"latency_ms": time.Since(start).Milliseconds(),
+				"checked_at": time.Now().Unix(),
+			}
 		}
 		status := fiber.StatusOK
 		state := "ok"
@@ -299,7 +313,12 @@ func registerHealthRoutes(r *fiber.App, checks []ReadinessCheck, logger *slog.Lo
 			status = fiber.StatusServiceUnavailable
 			state = "not_ready"
 		}
-		return c.Status(status).JSON(fiber.Map{"status": state, "checks": statuses})
+		return c.Status(status).JSON(fiber.Map{
+			"status":  state,
+			"checks":  statuses,
+			"version": "1.0.0",
+			"time":    time.Now().Unix(),
+		})
 	}
 
 	// /health is preserved as the liveness endpoint used by existing clients.

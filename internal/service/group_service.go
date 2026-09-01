@@ -20,7 +20,10 @@ var (
 	ErrGroupMemberNotFound = errors.New("群成员不存在")
 	ErrGroupFriendOnly     = errors.New("只能拉好友进群")
 	ErrGroupOwnerProtected = errors.New("不能移除群主")
+	ErrGroupMemberLimit    = errors.New("群成员数量已达上限")
 )
+
+const maxGroupMembers = 500 // 群组最大成员数
 
 type GroupService interface {
 	CreateGroup(ctx context.Context, ownerID uint, name, avatar string, memberIDs []uint) (*model.ChatGroupDetail, error)
@@ -139,6 +142,10 @@ func (s *groupService) CreateGroup(ctx context.Context, ownerID uint, name, avat
 	if len(memberIDs) == 0 {
 		return nil, ErrGroupMembersEmpty
 	}
+	// 检查成员数量上限（包括群主）
+	if len(memberIDs)+1 > maxGroupMembers {
+		return nil, ErrGroupMemberLimit
+	}
 
 	err := s.validateInvitees(ctx, ownerID, memberIDs)
 	if err != nil {
@@ -221,6 +228,10 @@ func (s *groupService) AddMembers(ctx context.Context, operatorID, groupID uint,
 	}
 	if len(newMemberIDs) == 0 {
 		return s.GetMembers(ctx, operatorID, groupID)
+	}
+	// 检查添加后是否超过上限
+	if len(existingMembers)+len(newMemberIDs) > maxGroupMembers {
+		return nil, ErrGroupMemberLimit
 	}
 	err = s.validateInvitees(ctx, operatorID, newMemberIDs)
 	if err != nil {

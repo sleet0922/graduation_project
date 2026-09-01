@@ -197,8 +197,14 @@ func validateConfig(config *ViperConfig) error {
 	if config.JWT.AccessTokenExpireSeconds <= 0 {
 		return fmt.Errorf("config value jwt.access_token_expire_seconds must be positive")
 	}
+	if config.JWT.AccessTokenExpireSeconds > 365*24*3600 {
+		return fmt.Errorf("config value jwt.access_token_expire_seconds must be <= 1 year")
+	}
 	if config.JWT.RefreshTokenExpireSeconds <= 0 {
 		return fmt.Errorf("config value jwt.refresh_token_expire_seconds must be positive")
+	}
+	if config.JWT.RefreshTokenExpireSeconds > 365*24*3600 {
+		return fmt.Errorf("config value jwt.refresh_token_expire_seconds must be <= 1 year")
 	}
 	if config.JWT.RefreshTokenExpireSeconds < config.JWT.AccessTokenExpireSeconds {
 		return fmt.Errorf("config value jwt.refresh_token_expire_seconds must be >= access_token_expire_seconds")
